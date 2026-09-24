@@ -27,6 +27,35 @@ flowchart LR
   DASH -->|WS live| API
 ```
 
+## Implementation status
+
+The spec MVP runs end to end on simulated reads. Real-world OCR measurement, two deliberate stubs, and production deployment are still open.
+
+### Implemented
+
+| Area | What is in place |
+|------|------------------|
+| Shared platform | Indian plate grammar (standard and BH), confusion correction, fuzzy matching, and shared schemas for plate reads, alerts, and flow windows |
+| Infrastructure | Docker stack: Redpanda, ClickHouse, PostGIS, Redis, MinIO. Makefile targets for install, infra, seed, simulate, backfill, tests, and OCR eval |
+| Simulator | Synthetic 20×20 city (live OpenStreetMap exists in code; Makefile defaults to `--synthetic`). ~60 cameras, zones, 3,000 vehicles, peak-hour trips. Scripted watchlist, cloned plate, convoy, loitering, wrong-way, and restricted-zone cases. Live `60×` mode and historical backfill |
+| Workers | Ingest with dedup, H3 enrichment, ClickHouse writes, and Redis last-seen. Analytics: 5-minute flow, segment speed, congestion, bottlenecks, volume anomalies, origin–destination counts. Alerts: watchlist (exact and fuzzy), cloned plate, convoy, loitering, geofence, wrong-way. Dedup, PostGIS storage, and live fan-out |
+| API | JWT and roles `admin`, `operator`, `analyst`. Trajectory search with required case ID, audit log, fuzzy merge, and impossible-hop flags. Analysts blocked from plate-level trajectory. Heatmap, flow, segments, origin–destination (cells under 5 trips hidden), bottlenecks, anomalies. Alert ack / dispatch / close with crop link when one exists. Camera, zone, and watchlist CRUD, CSV import, audit log, live WebSocket |
+| Dashboard | `/live` heatmap, cameras, congested segments, alert toasts. `/track` plate search and path playback (admin and operator). `/analytics` origin–destination, charts, bottlenecks, anomalies. `/alerts` filter, evidence, acknowledge, dispatch, close. `/admin` cameras, zones, watchlist, audit. Login via httpOnly cookie |
+| OCR engine | Video or RTSP pipeline: detect, track, rectify, CLAHE, recognize, fuse frames, publish. PARSeq when weights are present; mock recognizer for tests. Clear exit if plate-detector weights are missing. Eval harness (`make eval`) and synthetic plate / YOLO dataset generators. A local detector weight can live at `models/plate_det.pt` (gitignored) |
+
+### Left
+
+| Area | What is still open |
+|------|--------------------|
+| Plate restoration | Heavy deblur / super-resolution is a no-op behind `Enhancer`. CLAHE and the quality gate are real |
+| Vahan registry | `RegistryClient` always returns unknown, so the plate–vehicle mismatch alert does not fire on real registry data |
+| PARSeq fine-tune | `finetune_parseq` is a template. It logs a config and writes a placeholder file; it does not train |
+| Measured OCR accuracy | Checked-in `reports/ocr_eval.md` is the mock recognizer on 8 fixture images. No measured accuracy on real plates. `PARSEEQ_WEIGHTS` is unset |
+| Real cameras | The demo source is the simulator unless `ocr-engine` is pointed at a file or RTSP URL |
+| Edge and scale | Jetson, Hailo, TensorRT, Flink or Rust consumers, and a ClickHouse cluster are notes only |
+| Production auth | Logins are the demo users in `.env.example` |
+| Docs | README does not yet list public datasets recommended for detector and recognizer pretraining |
+
 ## Quickstart
 
 ```bash
