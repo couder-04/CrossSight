@@ -1,0 +1,19 @@
+{
+  "settings_version": "0.0.8",
+  "datasets_dir": "/Users/par_04/code_playground/datasets",
+  "weights_dir": "/Users/par_04/code_playground/weights",
+  "runs_dir": "/Users/par_04/code_playground/runs",
+  "uuid": "d44ff7ae10f7dca251d6d72e2b13a11464efefc38e74563bdfe4240f12727738",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "mlflow": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

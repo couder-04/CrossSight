@@ -1,0 +1,8 @@
+# Auto-generated synthetic plate detection dataset
+path: /Users/par_04/code_playground/sih/datasets/plates_synth
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  0: plate

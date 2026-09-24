@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: 222 47% 7%;
+  --surface-raised: 217 33% 11%;
+  --surface-overlay: 215 28% 14%;
+  --border: 215 20% 22%;
+  --muted: 215 16% 57%;
+  --accent: 199 89% 48%;
+  --accent-muted: 199 60% 35%;
+  --danger: 0 84% 60%;
+  --warning: 38 92% 50%;
+  --success: 142 71% 45%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-slate-100 font-sans antialiased;
+}
+
+.maplibregl-map {
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+input,
+select,
+textarea {
+  @apply bg-surface-overlay border border-border rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent;
+}
+
+table {
+  @apply w-full text-sm;
+}
+
+th {
+  @apply text-left text-muted font-medium py-2 px-3 border-b border-border;
+}
+
+td {
+  @apply py-2 px-3 border-b border-border/60;
+}
