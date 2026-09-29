@@ -10,5 +10,6 @@ export interface FlowWindow {
   avg_speed_kmh?: number | null;
   congestion_index?: number | null;
   volume?: number;
+  lane?: number | null;
 }
 

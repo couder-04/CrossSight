@@ -201,6 +201,20 @@ export const api = {
   anomalies(token?: string) {
     return request<{ anomalies: VolumeAnomaly[] }>("/analytics/anomalies", { token });
   },
+
+  routeDensity(window = "1h", token?: string) {
+    return request<{
+      corridors: Array<{ camera_a: string; camera_b: string; hop_count: number }>;
+      window: string;
+    }>(`/analytics/route-density?window=${encodeURIComponent(window)}`, { token });
+  },
+
+  cropUrl(key: string, token?: string) {
+    return request<{ key: string; url: string }>(
+      `/crops?key=${encodeURIComponent(key)}`,
+      { token },
+    );
+  },
 };
 
 export type { UserSession };

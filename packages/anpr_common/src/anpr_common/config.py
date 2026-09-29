@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     plateocr_device: str = Field(default="auto", alias="PLATEOCR_DEVICE")
     plateocr_det_conf: float = Field(default=0.4, alias="PLATEOCR_DET_CONF")
     plateocr_min_ocr_conf: float = Field(default=0.0, alias="PLATEOCR_MIN_OCR_CONF")
+    registry_path: str = Field(default="", alias="REGISTRY_PATH")
+    route_anomaly_min_cameras: int = Field(default=3, alias="ROUTE_ANOMALY_MIN_CAMERAS")
+    route_anomaly_distance_m: float = Field(default=8000.0, alias="ROUTE_ANOMALY_DISTANCE_M")
 
     map_style_url: str = Field(
         default="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",

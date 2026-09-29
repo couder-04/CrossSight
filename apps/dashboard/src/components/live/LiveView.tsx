@@ -29,6 +29,9 @@ export function LiveView() {
   const [heatmap, setHeatmap] = useState<Map<string, number>>(new Map());
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [flowByCamera, setFlowByCamera] = useState<Map<string, FlowWindow>>(new Map());
+  const [routeCorridors, setRouteCorridors] = useState<
+    Array<{ camera_a: string; camera_b: string; hop_count: number }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,11 +40,12 @@ export function LiveView() {
     setError(null);
     try {
       const at = new Date().toISOString();
-      const [cams, segs, hm, recentAlerts] = await Promise.all([
+      const [cams, segs, hm, recentAlerts, density] = await Promise.all([
         api.cameras(),
         api.segments(at),
         api.heatmap("15m"),
         api.alerts(),
+        api.routeDensity("1h").catch(() => ({ corridors: [] })),
       ]);
       setCameras(cams);
       setSegments(segs.segments);
@@ -49,6 +53,7 @@ export function LiveView() {
       hm.cells.forEach((c) => hmMap.set(String(c.h3), c.count));
       setHeatmap(hmMap);
       setAlerts(recentAlerts.slice(0, 20));
+      setRouteCorridors(density.corridors ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load live data");
     } finally {
@@ -112,9 +117,17 @@ export function LiveView() {
     const speeds = Array.from(flowByCamera.values())
       .map((f) => f.avg_speed_kmh)
       .filter((s): s is number => s != null);
-    const avgSpeed = speeds.length
+    let avgSpeed = speeds.length
       ? speeds.reduce((a, b) => a + b, 0) / speeds.length
       : null;
+    if (avgSpeed == null) {
+      const segSpeeds = segments
+        .map((s) => s.median_speed_kmh)
+        .filter((s): s is number => s != null && s > 0);
+      if (segSpeeds.length) {
+        avgSpeed = segSpeeds.reduce((a, b) => a + b, 0) / segSpeeds.length;
+      }
+    }
     const congested = segments.filter((s) => s.congestion_index >= 0.5).length;
     return { vehicles15m, avgSpeed, congested };
   }, [heatData, flowByCamera, segments]);
@@ -133,6 +146,33 @@ export function LiveView() {
       getElevation: (d) => Math.sqrt(d.count) * 80,
       elevationScale: 1,
       coverage: 0.9,
+    });
+
+    const maxHops = Math.max(1, ...routeCorridors.map((c) => c.hop_count));
+    const routePaths = routeCorridors
+      .map((c) => {
+        const a = cameras.find((cam) => cam.id === c.camera_a);
+        const b = cameras.find((cam) => cam.id === c.camera_b);
+        if (!a || !b) return null;
+        return {
+          path: [[a.lng, a.lat], [b.lng, b.lat]] as [number, number][],
+          hops: c.hop_count,
+          id: `${c.camera_a}-${c.camera_b}`,
+        };
+      })
+      .filter(Boolean) as { path: [number, number][]; hops: number; id: string }[];
+
+    const routeLayer = new PathLayer({
+      id: "route-density",
+      data: routePaths,
+      getPath: (d) => d.path,
+      getColor: (d) => {
+        const t = d.hops / maxHops;
+        return [251, 146, 60, Math.round(60 + t * 180)] as [number, number, number, number];
+      },
+      getWidth: (d) => 2 + (d.hops / maxHops) * 10,
+      widthMinPixels: 1,
+      pickable: true,
     });
 
     const segmentPaths = segments
@@ -169,8 +209,8 @@ export function LiveView() {
       pickable: true,
     });
 
-    return [heatLayer, pathLayer, cameraLayer];
-  }, [heatData, maxHeat, segments, cameras, cameraVolumes]);
+    return [heatLayer, routeLayer, pathLayer, cameraLayer];
+  }, [heatData, maxHeat, segments, cameras, cameraVolumes, routeCorridors]);
 
   if (loading) {
     return <LoadingState label="Loading live map…" />;

@@ -62,6 +62,8 @@ def _read_evidence(read: PlateRead) -> dict[str, Any]:
         "confidence": read.confidence,
         "direction": read.direction.value if read.direction else None,
         "vehicle_class": read.vehicle_class.value,
+        "crop_key": read.crop_key,
+        "lane": read.lane,
     }
 
 
@@ -299,7 +301,7 @@ class WrongWayRule(Rule):
 
 
 class PlateVehicleMismatchRule(Rule):
-    """Compares OCR vehicle class against registry (Vahan stub)."""
+    """Compares OCR vehicle class against registry (Vahan stub or FileRegistry)."""
 
     name = "plate_vehicle_mismatch"
 
@@ -327,6 +329,82 @@ class PlateVehicleMismatchRule(Rule):
                         "status": record.status,
                     },
                     "observed_class": read.vehicle_class.value,
+                },
+                needs_verification=True,
+                ts=read.ts,
+            )
+        ]
+
+
+class RouteAnomalyRule(Rule):
+    """Flag plates that suddenly appear far from their established corridor.
+
+    After a plate has been seen at ``ROUTE_ANOMALY_MIN_CAMERAS`` distinct cameras,
+    a new sighting whose camera is farther than ``ROUTE_ANOMALY_DISTANCE_M`` from
+    the plate's geographic centroid *and* not adjacent to the last camera is
+    treated as a suspicious route anomaly (not a clone-speed hop).
+    """
+
+    name = "route_anomaly"
+
+    async def evaluate(self, read: PlateRead, ctx: RuleContext) -> list[Alert]:
+        plate = read.plate_norm.upper()
+        cam = ctx.cameras.get(read.camera_id)
+        if cam is None:
+            return []
+
+        history_key = f"plate:cams:{plate}"
+        # Record this sighting for future evaluations.
+        await ctx.redis.zadd(history_key, {read.camera_id: read.ts.timestamp()})
+        await ctx.redis.expire(history_key, 7 * 24 * 3600)
+
+        members = await ctx.redis.zrange(history_key, 0, -1)
+        prior = [m for m in members if m != read.camera_id]
+        min_cams = getattr(ctx.settings, "route_anomaly_min_cameras", 3)
+        if len(set(prior)) < min_cams:
+            return []
+
+        # Geographic centroid of prior cameras.
+        prior_cams = [ctx.cameras[c] for c in set(prior) if c in ctx.cameras]
+        if not prior_cams:
+            return []
+        lat_c = sum(c.lat for c in prior_cams) / len(prior_cams)
+        lng_c = sum(c.lng for c in prior_cams) / len(prior_cams)
+        dist_from_centroid = haversine_m(lat_c, lng_c, cam.lat, cam.lng)
+        threshold = getattr(ctx.settings, "route_anomaly_distance_m", 8000.0)
+        if dist_from_centroid < threshold:
+            return []
+
+        # Adjacent hop is a normal corridor continuation — skip.
+        last = await ctx.last_seen(plate)
+        if last is not None:
+            prev_cam_id, _, _ = last
+            if (prev_cam_id, read.camera_id) in ctx.pair_distances or (
+                read.camera_id,
+                prev_cam_id,
+            ) in ctx.pair_distances:
+                # Only skip if marked adjacent at short range; pair_distances may
+                # include non-adjacent pairs when loaded with adjacent_only=False.
+                # Prefer explicit adjacent check via distance under 2 km.
+                pair_dist = ctx.pair_distances.get(
+                    (prev_cam_id, read.camera_id)
+                ) or ctx.pair_distances.get((read.camera_id, prev_cam_id))
+                if pair_dist is not None and pair_dist < 2500:
+                    return []
+
+        return [
+            Alert(
+                type=AlertType.route_anomaly,
+                severity=AlertSeverity.high,
+                plate_norm=plate,
+                camera_ids=[read.camera_id],
+                evidence={
+                    "reads": [_read_evidence(read)],
+                    "prior_cameras": sorted(set(prior)),
+                    "centroid_lat": lat_c,
+                    "centroid_lng": lng_c,
+                    "distance_from_centroid_m": dist_from_centroid,
+                    "threshold_m": threshold,
                 },
                 needs_verification=True,
                 ts=read.ts,

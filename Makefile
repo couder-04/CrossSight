@@ -1,4 +1,4 @@
-.PHONY: up down seed simulate backfill test types eval lint install workers api
+.PHONY: up down seed simulate backfill test types eval eval-plateocr fleet-ocr lint install workers api
 
 UV ?= uv
 COMPOSE ?= docker compose
@@ -39,6 +39,13 @@ test:
 eval:
 	mkdir -p reports
 	$(UV) run python -m ocr_engine.eval --fixture services/ocr_engine/fixtures/eval_set
+
+eval-plateocr:
+	mkdir -p reports
+	$(UV) run python -m ocr_engine.eval --fixture services/ocr_engine/fixtures/eval_set --recognizer plateocr
+
+fleet-ocr:
+	$(UV) run python -m ocr_engine.cli fleet --config services/ocr_engine/config/cameras.example.json --dry-run
 
 lint:
 	$(UV) run ruff check packages services scripts tests

@@ -404,6 +404,97 @@ async def anomalies(ch: ClickHouseDep, _user: UserDep) -> dict[str, Any]:
     return {"at": at.isoformat(), "anomalies": flagged}
 
 
+@router.get("/route-density")
+async def route_density(
+    ch: ClickHouseDep,
+    _user: UserDep,
+    window: str = Query("1h"),
+) -> dict[str, Any]:
+    """Aggregate consecutive camera-pair hop counts (route corridor density)."""
+    delta = _parse_window(window)
+    end = datetime.now(UTC)
+    start = end - delta
+    start_n = start.replace(tzinfo=None)
+    end_n = end.replace(tzinfo=None)
+    query = """
+        SELECT camera_a, camera_b, count() AS hops
+        FROM (
+            SELECT
+                plate_norm,
+                camera_id AS camera_b,
+                lagInFrame(camera_id) OVER (
+                    PARTITION BY plate_norm ORDER BY ts
+                ) AS camera_a,
+                ts
+            FROM anpr_reads
+            WHERE ts >= {start:DateTime} AND ts <= {end:DateTime}
+        )
+        WHERE camera_a != '' AND camera_a IS NOT NULL AND camera_a != camera_b
+        GROUP BY camera_a, camera_b
+        ORDER BY hops DESC
+        LIMIT 500
+    """
+    try:
+        result = ch.query(query, parameters={"start": start_n, "end": end_n})
+        corridors = [
+            {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
+            for row in result.result_rows
+        ]
+    except Exception:
+        # Fallback without window functions: use segment_speed sample counts.
+        fallback = """
+            SELECT camera_a, camera_b, sum(sample_count) AS hops
+            FROM segment_speed_5min
+            WHERE window_start >= {start:DateTime} AND window_start <= {end:DateTime}
+            GROUP BY camera_a, camera_b
+            ORDER BY hops DESC
+            LIMIT 500
+        """
+        result = ch.query(fallback, parameters={"start": start_n, "end": end_n})
+        corridors = [
+            {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
+            for row in result.result_rows
+        ]
+    if not corridors:
+        # Use latest available window when wall-clock is empty (60× sim).
+        latest = ch.query(
+            "SELECT max(ts) FROM anpr_reads"
+        )
+        if latest.result_rows and latest.result_rows[0][0] is not None:
+            end_n = latest.result_rows[0][0]
+            if hasattr(end_n, "tzinfo") and end_n.tzinfo is not None:
+                end_n = end_n.replace(tzinfo=None)
+            start_n = end_n - delta
+            try:
+                result = ch.query(query, parameters={"start": start_n, "end": end_n})
+                corridors = [
+                    {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
+                    for row in result.result_rows
+                ]
+            except Exception:
+                result = ch.query(
+                    """
+                    SELECT camera_a, camera_b, sum(sample_count) AS hops
+                    FROM segment_speed_5min
+                    WHERE window_start >= {start:DateTime} AND window_start <= {end:DateTime}
+                    GROUP BY camera_a, camera_b
+                    ORDER BY hops DESC
+                    LIMIT 500
+                    """,
+                    parameters={"start": start_n, "end": end_n},
+                )
+                corridors = [
+                    {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
+                    for row in result.result_rows
+                ]
+    return {
+        "window": window,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "corridors": corridors,
+    }
+
+
 def _camera_flow_baselines(ch) -> dict[str, float]:
     query = """
         SELECT camera_id, avg(volume) AS baseline

@@ -6,12 +6,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from anpr_common.schemas import AlertType, Direction, PlateFormat, PlateRead, VehicleClass
-from workers.alerts.registry import RegistryRecord
+from workers.alerts.registry import FileRegistryClient, RegistryRecord
 from workers.alerts.rules import (
     AlertDeduper,
     ClonedPlateRule,
     GeofenceRule,
     PlateVehicleMismatchRule,
+    RouteAnomalyRule,
     WatchlistRule,
     WrongWayRule,
 )
@@ -138,6 +139,76 @@ async def test_plate_vehicle_mismatch_with_registry():
     alerts = await rule.evaluate(_read(vehicle_class=VehicleClass.car), _ctx())
     assert len(alerts) == 1
     assert alerts[0].type == AlertType.plate_vehicle_mismatch
+
+
+@pytest.mark.asyncio
+async def test_route_anomaly_far_from_corridor(tmp_path):
+    # Build redis-like mock with zset behaviour.
+    store: dict[str, dict[str, float]] = {}
+
+    class FakeRedis:
+        async def zadd(self, key, mapping):
+            store.setdefault(key, {}).update(mapping)
+
+        async def expire(self, key, _ttl):
+            return True
+
+        async def zrange(self, key, _start, _end):
+            return list(store.get(key, {}).keys())
+
+    cameras = {
+        "cam-1": CameraInfo("cam-1", 18.50, 73.80, 0.0, "N"),
+        "cam-2": CameraInfo("cam-2", 18.51, 73.81, 90.0, "E"),
+        "cam-3": CameraInfo("cam-3", 18.52, 73.82, 180.0, "S"),
+        "cam-far": CameraInfo("cam-far", 18.70, 74.10, 0.0, "N"),  # ~30km away
+    }
+    # Seed prior cameras in redis.
+    key = "plate:cams:BR01AB1234"
+    store[key] = {"cam-1": 1.0, "cam-2": 2.0, "cam-3": 3.0}
+    ctx = _ctx(
+        cameras=cameras,
+        redis=FakeRedis(),
+        settings=SimpleNamespace(
+            max_urban_speed_kmh=120.0,
+            route_anomaly_min_cameras=3,
+            route_anomaly_distance_m=8000.0,
+        ),
+        last_seen=AsyncMock(return_value=("cam-3", datetime(2025, 6, 1, 12, 0, tzinfo=UTC), 0.9)),
+        pair_distances={},
+    )
+    rule = RouteAnomalyRule()
+    alerts = await rule.evaluate(_read(camera="cam-far"), ctx)
+    assert len(alerts) == 1
+    assert alerts[0].type == AlertType.route_anomaly
+
+
+@pytest.mark.asyncio
+async def test_file_registry_client(tmp_path):
+    path = tmp_path / "reg.json"
+    path.write_text('{"MH12XY9999": {"vehicle_class": "truck", "color": "blue"}}')
+    client = FileRegistryClient(path)
+    found = await client.lookup("MH12XY9999")
+    missing = await client.lookup("UNKNOWN1")
+    assert found.status == "found"
+    assert found.vehicle_class == VehicleClass.truck
+    assert missing.status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_watchlist_exact_includes_crop_key():
+    read = PlateRead(
+        camera_id="cam-1",
+        ts=datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC),
+        plate_raw="WL01AB9999",
+        plate_norm="WL01AB9999",
+        plate_valid=True,
+        plate_format=PlateFormat.standard,
+        confidence=0.95,
+        crop_key="cam-1/abc.jpg",
+        source="simulator",
+    )
+    alerts = await WatchlistRule().evaluate(read, _ctx())
+    assert alerts[0].evidence["reads"][0]["crop_key"] == "cam-1/abc.jpg"
 
 
 def test_alert_deduper_within_10_minutes():

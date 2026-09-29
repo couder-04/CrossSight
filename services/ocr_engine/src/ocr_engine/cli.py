@@ -33,6 +33,7 @@ def main() -> None:
 )
 @click.option("--dry-run", is_flag=True, help="Print events instead of publishing to Kafka/MinIO")
 @click.option("--max-frames", type=int, default=None, help="Stop after N frames (debug)")
+@click.option("--lanes", type=int, default=3, help="Number of lanes for lane attribution")
 def run_cmd(
     source: str,
     camera_id: str,
@@ -40,6 +41,7 @@ def run_cmd(
     backend: str | None,
     dry_run: bool,
     max_frames: int | None,
+    lanes: int,
 ) -> None:
     """Run the video OCR pipeline on a file or RTSP stream."""
     settings = get_settings()
@@ -49,6 +51,7 @@ def run_cmd(
         camera_heading_deg=camera_heading,
         dry_run=dry_run,
         backend=backend,
+        num_lanes=lanes,
     )
     try:
         count = pipeline.run(source, max_frames=max_frames)
@@ -59,6 +62,46 @@ def run_cmd(
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 1
         sys.exit(code)
+    except (RuntimeError, OSError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+@main.command("fleet")
+@click.option("--config", required=True, type=click.Path(exists=True), help="YAML/JSON camera fleet config")
+@click.option(
+    "--backend",
+    type=click.Choice(["plateocr", "legacy"], case_sensitive=False),
+    default=None,
+)
+@click.option("--dry-run", is_flag=True, help="Print events instead of publishing")
+@click.option("--max-frames", type=int, default=None, help="Per-camera frame cap (debug)")
+@click.option("--workers", type=int, default=None, help="Max concurrent camera workers")
+def fleet_cmd(
+    config: str,
+    backend: str | None,
+    dry_run: bool,
+    max_frames: int | None,
+    workers: int | None,
+) -> None:
+    """Run OCR on multiple cameras concurrently (files and/or RTSP)."""
+    from ocr_engine.fleet import run_fleet
+
+    try:
+        results = run_fleet(
+            config,
+            dry_run=dry_run,
+            backend=backend,
+            max_frames=max_frames,
+            max_workers=workers,
+        )
+        total = sum(results.values())
+        for cam_id, count in sorted(results.items()):
+            click.echo(f"{cam_id}: {count}")
+        click.echo(f"Total emitted: {total}")
+    except KeyboardInterrupt:
+        click.echo("Interrupted", err=True)
+        sys.exit(130)
     except (RuntimeError, OSError, ValueError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)

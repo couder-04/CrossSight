@@ -31,7 +31,7 @@ from ocr_engine.detect import (
     rectify_plate,
     validate_plate_weights,
 )
-from ocr_engine.enhance import NoopEnhancer, enhance_plate
+from ocr_engine.enhance import ClassicalDeblurEnhancer, enhance_plate
 from ocr_engine.fusion import FrameRead, fuse_track_reads
 from ocr_engine.recognize import MockRecognizer, ParseqRecognizer, Recognizer
 
@@ -57,6 +57,19 @@ class TrackState:
     best_quality: float = 0.0
     frames_seen: int = 0
     last_bbox: tuple[int, int, int, int] | None = None
+    lane: int | None = None
+    frame_width: int = 0
+
+
+def estimate_lane(
+    bbox: tuple[int, int, int, int], frame_width: int, num_lanes: int
+) -> int | None:
+    """Map plate bbox horizontal center to lane 1..N (left → right)."""
+    if num_lanes < 1 or frame_width <= 0:
+        return None
+    cx = (bbox[0] + bbox[2]) / 2.0
+    lane = int(cx / frame_width * num_lanes) + 1
+    return max(1, min(num_lanes, lane))
 
 
 def motion_bearing_deg(centers: list[tuple[float, float]]) -> float | None:
@@ -192,11 +205,13 @@ class OCRPipeline:
         dry_run: bool = False,
         recognizer: Recognizer | None = None,
         backend: str | None = None,
+        num_lanes: int = 3,
     ) -> None:
         self.settings = settings
         self.camera_id = camera_id
         self.camera_heading_deg = camera_heading_deg
         self.dry_run = dry_run
+        self.num_lanes = max(1, num_lanes)
         chosen = (backend or settings.ocr_backend or "plateocr").lower()
         if chosen not in ("plateocr", "legacy"):
             raise ValueError(f"Unknown OCR backend: {chosen}")
@@ -206,7 +221,7 @@ class OCRPipeline:
         self.plate_detector: PlateDetector | None = None
         self.plateocr_reader: Any = None
         self.recognizer: Recognizer | None = recognizer
-        self.enhancer = NoopEnhancer()
+        self.enhancer = ClassicalDeblurEnhancer()
         self.uploader = MinioUploader(settings) if not dry_run else None
         self.publisher = EventPublisher(settings, dry_run=dry_run)
         self.tracks: dict[int, TrackState] = {}
@@ -233,30 +248,63 @@ class OCRPipeline:
                 self.recognizer = build_recognizer(settings)
             logger.info("OCR pipeline backend=legacy (YOLO + PARSeq)")
 
-    def run(self, source: str, max_frames: int | None = None) -> int:
-        self.publisher.connect()
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video source: {source}")
+    def run(
+        self,
+        source: str,
+        max_frames: int | None = None,
+        reconnect: bool | None = None,
+        reconnect_delay: float = 2.0,
+    ) -> int:
+        """Process a video file or RTSP stream.
 
+        RTSP sources reconnect by default; file sources do not.
+        """
+        self.publisher.connect()
+        is_stream = str(source).lower().startswith(("rtsp://", "http://", "https://"))
+        do_reconnect = is_stream if reconnect is None else reconnect
         emitted = 0
         frame_idx = 0
         try:
             while True:
-                ok, frame = cap.read()
-                if not ok:
+                cap = cv2.VideoCapture(source)
+                if not cap.isOpened():
+                    if not do_reconnect:
+                        raise RuntimeError(f"Cannot open video source: {source}")
+                    logger.warning("Cannot open %s; retrying in %.1fs", source, reconnect_delay)
+                    import time
+
+                    time.sleep(reconnect_delay)
+                    continue
+                # Prefer TCP for RTSP stability when OpenCV/FFmpeg supports it.
+                if is_stream:
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                emptied = False
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        emptied = True
+                        break
+                    frame_idx += 1
+                    if max_frames and frame_idx > max_frames:
+                        emptied = False
+                        do_reconnect = False
+                        break
+                    if self.backend == "plateocr":
+                        self._process_frame_plateocr(frame)
+                    else:
+                        self._process_frame_legacy(frame)
+                    emitted += self._finalize_stale_tracks()
+                cap.release()
+                if max_frames and frame_idx >= max_frames:
                     break
-                frame_idx += 1
-                if max_frames and frame_idx > max_frames:
+                if not do_reconnect or not emptied:
                     break
-                if self.backend == "plateocr":
-                    self._process_frame_plateocr(frame)
-                else:
-                    self._process_frame_legacy(frame)
-                emitted += self._finalize_stale_tracks()
+                logger.warning("Stream ended for %s; reconnecting in %.1fs", source, reconnect_delay)
+                import time
+
+                time.sleep(reconnect_delay)
         finally:
             emitted += self._finalize_all_tracks()
-            cap.release()
             self.publisher.close()
         return emitted
 
@@ -302,6 +350,7 @@ class OCRPipeline:
         hits = self.plateocr_reader.read(frame)
         current_ids: set[int] = set()
         unmatched = set(self.tracks.keys())
+        frame_h, frame_w = frame.shape[:2]
 
         for hit in hits:
             best_tid: int | None = None
@@ -328,18 +377,37 @@ class OCRPipeline:
             current_ids.add(best_tid)
             state.frames_seen += 1
             state.last_bbox = hit.bbox
+            state.frame_width = frame_w
             state.centers.append(_bbox_center(hit.bbox))
+            state.lane = estimate_lane(hit.bbox, frame_w, self.num_lanes)
             probs = hit.char_probs or [hit.ocr_confidence] * max(1, len(hit.text))
             quality = float(hit.det_confidence)
-            state.frame_reads.append(
-                FrameRead(text=hit.text, char_probs=probs, quality=quality)
-            )
             x1, y1, x2, y2 = hit.bbox
-            h, w = frame.shape[:2]
-            crop = frame[max(0, y1) : min(h, y2), max(0, x1) : min(w, x2)]
-            if crop.size and quality >= state.best_quality:
-                state.best_quality = quality
-                state.best_crop = crop.copy()
+            crop = frame[max(0, y1) : min(frame_h, y2), max(0, x1) : min(frame_w, x2)]
+            enhanced_text = hit.text
+            if crop.size:
+                enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
+                # Re-OCR enhanced crop only when gate fired (quality/conf low) via enhancer path.
+                # PlateOCR already OCR'd the raw crop; keep text but store enhanced crop for upload.
+                if quality < 0.45 or hit.ocr_confidence < 0.65:
+                    try:
+                        re_hits = self.plateocr_reader.read(enhanced)
+                        if re_hits:
+                            best_re = max(re_hits, key=lambda h: h.ocr_confidence)
+                            if best_re.ocr_confidence >= hit.ocr_confidence:
+                                enhanced_text = best_re.text
+                                probs = best_re.char_probs or [
+                                    best_re.ocr_confidence
+                                ] * max(1, len(best_re.text))
+                                quality = max(quality, float(best_re.det_confidence))
+                    except Exception:
+                        logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
+                if quality >= state.best_quality:
+                    state.best_quality = quality
+                    state.best_crop = enhanced.copy()
+            state.frame_reads.append(
+                FrameRead(text=enhanced_text, char_probs=probs, quality=quality)
+            )
 
         self._active_ids = current_ids
 
@@ -364,8 +432,10 @@ class OCRPipeline:
             x1, y1, x2, y2 = veh.bbox
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
             state.centers.append((cx, cy))
-
             h, w = frame.shape[:2]
+            state.frame_width = w
+            state.lane = estimate_lane(veh.bbox, w, self.num_lanes)
+
             pad = 10
             vx1 = max(0, int(x1) - pad)
             vy1 = max(0, int(y1) - pad)
@@ -455,6 +525,7 @@ class OCRPipeline:
             confidence=round(fused.confidence, 3),
             char_conf=fused.char_conf,
             alternates=fused.alternates,
+            lane=state.lane,
             direction=direction,
             vehicle_class=VEHICLE_CLASS_MAP.get(state.vehicle_class, VehicleClass.car),
             crop_key=crop_key,

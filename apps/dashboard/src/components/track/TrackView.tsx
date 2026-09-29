@@ -3,7 +3,7 @@
 import { PathStyleExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DeckMap } from "@/components/map/DeckMap";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
@@ -51,6 +51,7 @@ export function TrackView() {
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [timeFrac, setTimeFrac] = useState(1);
+  const [cropUrls, setCropUrls] = useState<Record<string, string>>({});
 
   const search = useCallback(async () => {
     if (!plate.trim() || !caseId.trim()) {
@@ -124,6 +125,32 @@ export function TrackView() {
     return { sightings: sightingList, trips: tripList, timeRange: [min, max] as [number, number] };
   }, [data]);
 
+  useEffect(() => {
+    const keys = sightings.map((s) => s.crop_key).filter(Boolean) as string[];
+    if (keys.length === 0) {
+      setCropUrls({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(
+        keys.slice(0, 40).map(async (key) => {
+          try {
+            const res = await api.cropUrl(key);
+            next[key] = res.url;
+          } catch {
+            // crop may be missing for simulator-only reads
+          }
+        }),
+      );
+      if (!cancelled) setCropUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sightings]);
+
   const currentTime = timeRange[0] + (timeRange[1] - timeRange[0]) * timeFrac;
 
   const layers = useMemo(() => {
@@ -153,7 +180,6 @@ export function TrackView() {
         d.impossible_hop ? [239, 68, 68, 230] : [148, 163, 184, 200],
       getWidth: 4,
       extensions: [dashExt],
-      // PathStyleExtension props (not in PathLayer TS types)
       getDashArray: [4, 4] as [number, number],
       dashJustified: true,
     } as ConstructorParameters<typeof PathLayer<TripPath>>[0]);
@@ -210,6 +236,13 @@ export function TrackView() {
                   </div>
                   <p className="text-muted text-xs mt-1">{formatTs(s.ts)}</p>
                   {s.direction && <p className="text-xs mt-1">Direction: {s.direction}</p>}
+                  {s.crop_key && cropUrls[s.crop_key] && (
+                    <img
+                      src={cropUrls[s.crop_key]}
+                      alt={`Plate crop at ${s.camera_id}`}
+                      className="mt-2 rounded border border-border max-h-16 object-contain bg-black/40"
+                    />
+                  )}
                 </li>
               ))}
             </ol>

@@ -4,7 +4,7 @@ export type AlertSeverity = "low" | "medium" | "high" | "critical";
 
 export type AlertStatus = "new" | "acknowledged" | "dispatched" | "closed" | "false_positive";
 
-export type AlertType = "watchlist" | "cloned_plate" | "convoy" | "loitering" | "geofence" | "wrong_way" | "plate_vehicle_mismatch";
+export type AlertType = "watchlist" | "cloned_plate" | "convoy" | "loitering" | "geofence" | "wrong_way" | "plate_vehicle_mismatch" | "route_anomaly";
 
 export interface Alert {
   id?: string;

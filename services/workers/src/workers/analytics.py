@@ -64,6 +64,7 @@ class CameraWindow:
     window_start: datetime
     counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     speeds: list[float] = field(default_factory=list)
+    lane: int | None = None
 
     @property
     def volume(self) -> int:
@@ -76,7 +77,7 @@ class CameraWindow:
 class AnalyticsEngine:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.windows: dict[tuple[str, datetime], CameraWindow] = {}
+        self.windows: dict[tuple[str, int | None, datetime], CameraWindow] = {}
         self.plate_states: dict[str, PlateState] = {}
         self.pair_samples: dict[tuple[str, str, datetime], list[tuple[float, float]]] = defaultdict(list)
         self.pair_medians: dict[tuple[str, str], float] = {}
@@ -106,9 +107,9 @@ class AnalyticsEngine:
         if self.watermark is None or ts > self.watermark:
             self.watermark = ts
         ws = _floor_window(read.ts)
-        key = (read.camera_id, ws)
+        key = (read.camera_id, read.lane, ws)
         if key not in self.windows:
-            self.windows[key] = CameraWindow(window_start=ws)
+            self.windows[key] = CameraWindow(window_start=ws, lane=read.lane)
         win = self.windows[key]
         win.counts[read.vehicle_class.value] += 1
         if read.speed_kmh is not None:
@@ -118,7 +119,7 @@ class AnalyticsEngine:
         self._update_segment_speed(read)
         self._check_volume_anomaly(read.camera_id, read.ts, win.volume)
 
-        return self._maybe_emit_flow(read.camera_id, ws)
+        return self._maybe_emit_flow(read.camera_id, read.lane, ws)
 
     def _update_segment_speed(self, read: PlateRead) -> None:
         state = self.plate_states.setdefault(read.plate_norm, PlateState())
@@ -193,33 +194,59 @@ class AnalyticsEngine:
             return _floor_window(self.watermark)
         return _floor_window(datetime.now(UTC))
 
-    def _maybe_emit_flow(self, camera_id: str, ws: datetime) -> list[FlowWindow]:
+    def _maybe_emit_flow(
+        self, camera_id: str, lane: int | None, ws: datetime
+    ) -> list[FlowWindow]:
         now_ws = self._watermark_floor()
         if ws >= now_ws:
             return []
-        key = (camera_id, ws)
+        key = (camera_id, lane, ws)
         win = self.windows.pop(key, None)
         if win is None:
             return []
         return [self._flow_window(camera_id, win)]
 
+    def _camera_free_flow(self, camera_id: str) -> float | None:
+        speeds = [
+            v
+            for (a, b), v in self.free_flow.items()
+            if (a == camera_id or b == camera_id) and v and v > 0
+        ]
+        if not speeds:
+            return None
+        return statistics.median(speeds)
+
     def _flow_window(self, camera_id: str, win: CameraWindow) -> FlowWindow:
+        avg = win.avg_speed()
         congestion = None
+        ff = self._camera_free_flow(camera_id)
+        if avg is not None and ff and ff > 0:
+            congestion = max(0.0, min(1.0, 1.0 - (avg / ff)))
+        else:
+            # Fall back to mean segment congestion touching this camera.
+            segs = [
+                ci
+                for (a, b), ci in self.segment_congestion.items()
+                if a == camera_id or b == camera_id
+            ]
+            if segs:
+                congestion = max(0.0, min(1.0, statistics.mean(segs)))
         return FlowWindow(
             camera_id=camera_id,
             window_start=win.window_start,
             window_end=win.window_start + timedelta(minutes=WINDOW_MINUTES),
             counts_by_class=dict(win.counts),
-            avg_speed_kmh=win.avg_speed(),
+            avg_speed_kmh=avg,
             congestion_index=congestion,
             volume=win.volume,
+            lane=win.lane,
         )
 
     def flush_closed_windows(self) -> list[FlowWindow]:
         now_ws = self._watermark_floor()
         out: list[FlowWindow] = []
         for key in list(self.windows):
-            cam, ws = key
+            cam, _lane, ws = key
             if ws < now_ws:
                 win = self.windows.pop(key)
                 out.append(self._flow_window(cam, win))
@@ -266,12 +293,19 @@ class AnalyticsEngine:
         self.pair_samples.clear()
         return rows
 
-    def detect_bottlenecks(self, flow_by_camera: dict[str, int]) -> list[dict[str, Any]]:
+    def detect_bottlenecks(self, flow_by_camera: dict[str, int], how: int | None = None) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
+        how_key = how if how is not None else 0
         for (a, b), ci in self.segment_congestion.items():
             if ci < CONGESTION_THRESHOLD:
                 continue
-            baseline = self.volume_baselines.get((b, 0))
+            baseline = self.volume_baselines.get((b, how_key))
+            if not baseline and how_key != 0:
+                # Fall back to any known hour baseline for camera b.
+                baseline = next(
+                    (v for (cam, _), v in self.volume_baselines.items() if cam == b),
+                    None,
+                )
             if not baseline:
                 continue
             mu, _ = baseline
@@ -337,14 +371,15 @@ class AnalyticsWorker:
         assert self._engine is not None and self._ch is not None
         self._engine.close_idle_trips()
         flow_map: dict[str, int] = {}
+        how = _hour_of_week(self._engine.watermark) if self._engine.watermark else 0
         for fw in self._engine.flush_closed_windows():
-            flow_map[fw.camera_id] = fw.volume
+            flow_map[fw.camera_id] = flow_map.get(fw.camera_id, 0) + fw.volume
             await self._publish_flow(fw)
             await self._ch.insert_flow_5min_async(
                 [
                     {
                         "camera_id": fw.camera_id,
-                        "lane": None,
+                        "lane": fw.lane,
                         "window_start": fw.window_start,
                         "counts_car": fw.counts_by_class.get(VehicleClass.car.value, 0),
                         "counts_motorcycle": fw.counts_by_class.get(VehicleClass.motorcycle.value, 0),
@@ -364,7 +399,23 @@ class AnalyticsWorker:
         if od_rows:
             await self._ch.insert_od_hourly_async(od_rows)
         if flow_map:
-            self._engine.detect_bottlenecks(flow_map)
+            found = self._engine.detect_bottlenecks(flow_map, how=how)
+            if found and self._redis is not None:
+                import orjson as _orjson
+
+                await self._redis.publish(
+                    "bottlenecks",
+                    _orjson.dumps(found).decode(),
+                )
+            if self._engine.anomalies and self._redis is not None:
+                import orjson as _orjson
+
+                payload = self._engine.anomalies[-20:]
+                await self._redis.publish(
+                    "anomalies",
+                    _orjson.dumps(payload).decode(),
+                )
+                self._engine.anomalies.clear()
 
     async def _tick_loop(self) -> None:
         while not self._stop.is_set():

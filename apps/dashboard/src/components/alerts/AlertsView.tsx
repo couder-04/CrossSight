@@ -145,6 +145,8 @@ export function AlertsView() {
             <option value="loitering">Loitering</option>
             <option value="geofence">Geofence</option>
             <option value="wrong_way">Wrong way</option>
+            <option value="route_anomaly">Route anomaly</option>
+            <option value="plate_vehicle_mismatch">Plate/vehicle mismatch</option>
           </Select>
           <Select label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value)}>
             <option value="">All</option>

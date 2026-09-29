@@ -1,5 +1,6 @@
 """Tests for enhancement gating logic."""
 
+import cv2
 import numpy as np
 from ocr_engine.enhance import (
     CONFIDENCE_THRESHOLD,
@@ -50,3 +51,22 @@ def test_enhance_plate_skips_heavy_when_good():
     enhancer = CountingEnhancer()
     enhance_plate(img, quality=0.9, confidence=0.9, enhancer=enhancer)
     assert enhancer.calls == 0
+
+
+def test_classical_deblur_changes_blurry_image():
+    from ocr_engine.enhance import ClassicalDeblurEnhancer
+
+    rng = np.random.default_rng(0)
+    sharp = rng.integers(0, 255, (40, 120, 3), dtype=np.uint8)
+    blurry = cv2.GaussianBlur(sharp, (9, 9), 0)
+    out = ClassicalDeblurEnhancer().enhance(blurry)
+    assert out.shape == blurry.shape
+    assert not np.array_equal(out, blurry)
+
+
+def test_estimate_lane_left_to_right():
+    from ocr_engine.pipeline import estimate_lane
+
+    assert estimate_lane((10, 0, 30, 20), frame_width=300, num_lanes=3) == 1
+    assert estimate_lane((140, 0, 160, 20), frame_width=300, num_lanes=3) == 2
+    assert estimate_lane((270, 0, 290, 20), frame_width=300, num_lanes=3) == 3

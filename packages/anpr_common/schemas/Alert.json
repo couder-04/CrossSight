@@ -29,7 +29,8 @@
         "loitering",
         "geofence",
         "wrong_way",
-        "plate_vehicle_mismatch"
+        "plate_vehicle_mismatch",
+        "route_anomaly"
       ],
       "title": "AlertType",
       "type": "string"

@@ -49,6 +49,18 @@
       "default": 0,
       "title": "Volume",
       "type": "integer"
+    },
+    "lane": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lane"
     }
   },
   "required": [

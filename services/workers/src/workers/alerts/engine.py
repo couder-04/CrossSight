@@ -13,7 +13,7 @@ from anpr_common.config import Settings, get_settings
 from anpr_common.schemas import Alert, PlateRead
 from pydantic import ValidationError
 
-from workers.alerts.registry import NoopRegistryClient, RegistryClient
+from workers.alerts.registry import RegistryClient, build_registry_client
 from workers.alerts.rules import (
     AlertDeduper,
     ClonedPlateRule,
@@ -22,6 +22,7 @@ from workers.alerts.rules import (
     GeofenceRule,
     LoiteringRule,
     PlateVehicleMismatchRule,
+    RouteAnomalyRule,
     Rule,
     WatchlistRule,
     WrongWayRule,
@@ -65,7 +66,7 @@ class AlertEngine:
 
 
 def build_rules(registry: RegistryClient | None = None) -> list[Rule]:
-    reg = registry or NoopRegistryClient()
+    reg = registry or build_registry_client(None)
     return [
         WatchlistRule(),
         ClonedPlateRule(),
@@ -74,6 +75,7 @@ def build_rules(registry: RegistryClient | None = None) -> list[Rule]:
         GeofenceRule(),
         WrongWayRule(),
         PlateVehicleMismatchRule(reg),
+        RouteAnomalyRule(),
     ]
 
 
@@ -86,7 +88,7 @@ class AlertsWorker:
     ) -> None:
         self.settings = settings or get_settings()
         self.health_port = health_port
-        self.registry = registry or NoopRegistryClient()
+        self.registry = registry or build_registry_client(self.settings.registry_path)
         self._consumer: AIOKafkaConsumer | None = None
         self._producer: AIOKafkaProducer | None = None
         self._health = HealthServer("alerts", health_port)

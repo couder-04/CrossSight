@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import get_session_factory
-from api.routes import alerts, analytics, audit, auth, cameras, trajectory, watchlist, ws, zones
+from api.routes import alerts, analytics, audit, auth, cameras, crops, trajectory, watchlist, ws, zones
 from api.seed import ensure_seed_users
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(trajectory.router)
     app.include_router(analytics.router)
     app.include_router(alerts.router)
+    app.include_router(crops.router)
     app.include_router(audit.router)
     app.include_router(ws.router)
 

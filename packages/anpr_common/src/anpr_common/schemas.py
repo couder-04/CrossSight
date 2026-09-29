@@ -46,6 +46,7 @@ class AlertType(str, Enum):
     geofence = "geofence"
     wrong_way = "wrong_way"
     plate_vehicle_mismatch = "plate_vehicle_mismatch"
+    route_anomaly = "route_anomaly"
 
 
 class AlertSeverity(str, Enum):
@@ -114,6 +115,7 @@ class FlowWindow(BaseModel):
     avg_speed_kmh: float | None = None
     congestion_index: float | None = None
     volume: int = 0
+    lane: int | None = None
 
 
 def export_json_schemas(out_dir: str | Path) -> list[Path]:
