@@ -18,6 +18,8 @@ build/
 *.GraphML
 *.graphml
 .DS_Store
+:memory:.ses
+*.ses
 apps/dashboard/src/types/generated/
 services/simulator/data/cache/
 *.pt
