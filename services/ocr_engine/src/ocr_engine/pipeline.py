@@ -1,4 +1,9 @@
-"""Video OCR pipeline: detect → track → read → fuse → publish."""
+"""Video OCR pipeline: detect → track → read → fuse → publish.
+
+Backends:
+  - plateocr (default): FastALPR YOLOv9 + CCT ONNX (https://github.com/Ajitesh-07/PlateOCR)
+  - legacy: Ultralytics vehicle/plate YOLO + PARSeq
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import cv2
@@ -39,6 +44,8 @@ VEHICLE_CLASS_MAP = {
     "truck": VehicleClass.truck,
 }
 
+BackendName = Literal["plateocr", "legacy"]
+
 
 @dataclass
 class TrackState:
@@ -49,6 +56,7 @@ class TrackState:
     best_crop: np.ndarray | None = None
     best_quality: float = 0.0
     frames_seen: int = 0
+    last_bbox: tuple[int, int, int, int] | None = None
 
 
 def motion_bearing_deg(centers: list[tuple[float, float]]) -> float | None:
@@ -72,6 +80,26 @@ def estimate_direction(
         return None
     travel = (bearing + camera_heading_deg) % 360.0
     return bearing_to_direction(travel)
+
+
+def _bbox_iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _bbox_center(b: tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = b
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
 
 class MinioUploader:
@@ -154,6 +182,7 @@ def build_recognizer(settings: Settings, use_mock: bool = False) -> Recognizer:
 
 class OCRPipeline:
     FUSION_MIN_FRAMES = 3
+    IOU_MATCH_THRESH = 0.3
 
     def __init__(
         self,
@@ -162,20 +191,47 @@ class OCRPipeline:
         camera_heading_deg: float = 0.0,
         dry_run: bool = False,
         recognizer: Recognizer | None = None,
+        backend: str | None = None,
     ) -> None:
         self.settings = settings
         self.camera_id = camera_id
         self.camera_heading_deg = camera_heading_deg
         self.dry_run = dry_run
-        weights = validate_plate_weights(settings.plate_det_weights)
-        self.vehicle_detector = VehicleDetector()
-        self.plate_detector = PlateDetector(weights)
-        self.recognizer = recognizer or build_recognizer(settings)
+        chosen = (backend or settings.ocr_backend or "plateocr").lower()
+        if chosen not in ("plateocr", "legacy"):
+            raise ValueError(f"Unknown OCR backend: {chosen}")
+        self.backend: BackendName = chosen  # type: ignore[assignment]
+
+        self.vehicle_detector: VehicleDetector | None = None
+        self.plate_detector: PlateDetector | None = None
+        self.plateocr_reader: Any = None
+        self.recognizer: Recognizer | None = recognizer
         self.enhancer = NoopEnhancer()
         self.uploader = MinioUploader(settings) if not dry_run else None
         self.publisher = EventPublisher(settings, dry_run=dry_run)
         self.tracks: dict[int, TrackState] = {}
         self._active_ids: set[int] = set()
+        self._next_track_id = 1
+
+        if self.backend == "plateocr":
+            from ocr_engine.plateocr_backend import PlateOCRReader, ensure_plateocr_available
+
+            ensure_plateocr_available()
+            self.plateocr_reader = PlateOCRReader(
+                detector_model=settings.plateocr_detector,
+                ocr_model=settings.plateocr_ocr_model,
+                device=settings.plateocr_device,
+                det_conf=settings.plateocr_det_conf,
+                min_ocr_conf=settings.plateocr_min_ocr_conf,
+            )
+            logger.info("OCR pipeline backend=plateocr (FastALPR / PlateOCR)")
+        else:
+            weights = validate_plate_weights(settings.plate_det_weights)
+            self.vehicle_detector = VehicleDetector()
+            self.plate_detector = PlateDetector(weights)
+            if self.recognizer is None:
+                self.recognizer = build_recognizer(settings)
+            logger.info("OCR pipeline backend=legacy (YOLO + PARSeq)")
 
     def run(self, source: str, max_frames: int | None = None) -> int:
         self.publisher.connect()
@@ -193,7 +249,10 @@ class OCRPipeline:
                 frame_idx += 1
                 if max_frames and frame_idx > max_frames:
                     break
-                self._process_frame(frame)
+                if self.backend == "plateocr":
+                    self._process_frame_plateocr(frame)
+                else:
+                    self._process_frame_legacy(frame)
                 emitted += self._finalize_stale_tracks()
         finally:
             emitted += self._finalize_all_tracks()
@@ -201,7 +260,94 @@ class OCRPipeline:
             self.publisher.close()
         return emitted
 
-    def _process_frame(self, frame: np.ndarray) -> None:
+    def run_image(self, source: str) -> int:
+        """Single-image ALPR (plateocr backend). Emits one event per plate found."""
+        if self.backend != "plateocr" or self.plateocr_reader is None:
+            raise RuntimeError("run_image requires OCR_BACKEND=plateocr")
+        self.publisher.connect()
+        img = cv2.imread(source)
+        if img is None:
+            raise RuntimeError(f"Cannot read image: {source}")
+        hits = self.plateocr_reader.read(img)
+        emitted = 0
+        try:
+            for hit in hits:
+                x1, y1, x2, y2 = hit.bbox
+                crop = img[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+                state = TrackState(
+                    track_id=self._next_track_id,
+                    centers=[_bbox_center(hit.bbox)],
+                    frame_reads=[
+                        FrameRead(
+                            text=hit.text,
+                            char_probs=hit.char_probs
+                            or [hit.ocr_confidence] * max(1, len(hit.text)),
+                            quality=hit.det_confidence,
+                        )
+                    ],
+                    best_crop=crop.copy() if crop.size else None,
+                    best_quality=hit.det_confidence,
+                    frames_seen=self.FUSION_MIN_FRAMES,
+                    last_bbox=hit.bbox,
+                )
+                self._next_track_id += 1
+                if self._emit_track(state):
+                    emitted += 1
+        finally:
+            self.publisher.close()
+        return emitted
+
+    def _process_frame_plateocr(self, frame: np.ndarray) -> None:
+        assert self.plateocr_reader is not None
+        hits = self.plateocr_reader.read(frame)
+        current_ids: set[int] = set()
+        unmatched = set(self.tracks.keys())
+
+        for hit in hits:
+            best_tid: int | None = None
+            best_iou = 0.0
+            for tid in list(unmatched):
+                prev = self.tracks[tid].last_bbox
+                if prev is None:
+                    continue
+                iou = _bbox_iou(hit.bbox, prev)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_tid = tid
+
+            if best_tid is not None and best_iou >= self.IOU_MATCH_THRESH:
+                state = self.tracks[best_tid]
+                unmatched.discard(best_tid)
+            else:
+                tid = self._next_track_id
+                self._next_track_id += 1
+                state = TrackState(track_id=tid)
+                self.tracks[tid] = state
+                best_tid = tid
+
+            current_ids.add(best_tid)
+            state.frames_seen += 1
+            state.last_bbox = hit.bbox
+            state.centers.append(_bbox_center(hit.bbox))
+            probs = hit.char_probs or [hit.ocr_confidence] * max(1, len(hit.text))
+            quality = float(hit.det_confidence)
+            state.frame_reads.append(
+                FrameRead(text=hit.text, char_probs=probs, quality=quality)
+            )
+            x1, y1, x2, y2 = hit.bbox
+            h, w = frame.shape[:2]
+            crop = frame[max(0, y1) : min(h, y2), max(0, x1) : min(w, x2)]
+            if crop.size and quality >= state.best_quality:
+                state.best_quality = quality
+                state.best_crop = crop.copy()
+
+        self._active_ids = current_ids
+
+    def _process_frame_legacy(self, frame: np.ndarray) -> None:
+        assert self.vehicle_detector is not None
+        assert self.plate_detector is not None
+        assert self.recognizer is not None
+
         vehicles = self.vehicle_detector.track(frame)
         current_ids: set[int] = set()
         for veh in vehicles:

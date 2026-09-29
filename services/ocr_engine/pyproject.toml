@@ -18,10 +18,12 @@ dependencies = [
   "click>=8.1",
   "pyyaml>=6.0",
   "lap>=0.5.13",
+  "fast-alpr[onnx]==0.4.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "ruff>=0.5"]
+plateocr-gpu = ["fast-alpr[onnx-gpu]==0.4.0"]
 
 [build-system]
 requires = ["hatchling"]

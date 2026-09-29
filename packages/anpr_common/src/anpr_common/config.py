@@ -64,9 +64,23 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, alias="API_PORT")
     cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
 
+    ocr_backend: Literal["plateocr", "legacy"] = Field(
+        default="plateocr", alias="OCR_BACKEND"
+    )
     plate_det_weights: str = Field(default="", alias="PLATE_DET_WEIGHTS")
     parseq_weights: str = Field(default="", alias="PARSEEQ_WEIGHTS")
     ocr_camera_id: str = Field(default="cam-demo", alias="OCR_CAMERA_ID")
+    plateocr_detector: str = Field(
+        default="yolo-v9-s-608-license-plate-end2end",
+        alias="PLATEOCR_DETECTOR",
+    )
+    plateocr_ocr_model: str = Field(
+        default="cct-s-v2-global-model",
+        alias="PLATEOCR_OCR_MODEL",
+    )
+    plateocr_device: str = Field(default="auto", alias="PLATEOCR_DEVICE")
+    plateocr_det_conf: float = Field(default=0.4, alias="PLATEOCR_DET_CONF")
+    plateocr_min_ocr_conf: float = Field(default=0.0, alias="PLATEOCR_MIN_OCR_CONF")
 
     map_style_url: str = Field(
         default="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",

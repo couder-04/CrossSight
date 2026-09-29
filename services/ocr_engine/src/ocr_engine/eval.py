@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--recognizer",
-        choices=("mock", "parseq"),
+        choices=("mock", "parseq", "plateocr"),
         default="mock",
         help="Recognizer to use (default: mock, no weights required)",
     )
@@ -184,6 +184,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.recognizer == "mock":
         recognizer = MockRecognizer(ground_truth=gt_map)
         model_ids = {"recognizer": "MockRecognizer", "plate_det": "n/a (eval images only)"}
+    elif args.recognizer == "plateocr":
+        from anpr_common.config import get_settings
+
+        from ocr_engine.plateocr_backend import PlateOCRRecognizer
+
+        settings = get_settings()
+        recognizer = PlateOCRRecognizer(
+            detector_model=settings.plateocr_detector,
+            ocr_model=settings.plateocr_ocr_model,
+            device=settings.plateocr_device,
+            det_conf=settings.plateocr_det_conf,
+            min_ocr_conf=settings.plateocr_min_ocr_conf,
+        )
+        model_ids = {
+            "recognizer": "PlateOCRRecognizer (FastALPR CCT)",
+            "detector": settings.plateocr_detector,
+            "ocr_model": settings.plateocr_ocr_model,
+        }
     else:
         from anpr_common.config import get_settings
 

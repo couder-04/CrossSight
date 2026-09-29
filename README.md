@@ -27,34 +27,46 @@ flowchart LR
   DASH -->|WS live| API
 ```
 
+
+
+
+
 ## Implementation status
 
 The spec MVP runs end to end on simulated reads. Real-world OCR measurement, two deliberate stubs, and production deployment are still open.
 
 ### Implemented
 
-| Area | What is in place |
-|------|------------------|
-| Shared platform | Indian plate grammar (standard and BH), confusion correction, fuzzy matching, and shared schemas for plate reads, alerts, and flow windows |
-| Infrastructure | Docker stack: Redpanda, ClickHouse, PostGIS, Redis, MinIO. Makefile targets for install, infra, seed, simulate, backfill, tests, and OCR eval |
-| Simulator | Synthetic 20×20 city (live OpenStreetMap exists in code; Makefile defaults to `--synthetic`). ~60 cameras, zones, 3,000 vehicles, peak-hour trips. Scripted watchlist, cloned plate, convoy, loitering, wrong-way, and restricted-zone cases. Live `60×` mode and historical backfill |
-| Workers | Ingest with dedup, H3 enrichment, ClickHouse writes, and Redis last-seen. Analytics: 5-minute flow, segment speed, congestion, bottlenecks, volume anomalies, origin–destination counts. Alerts: watchlist (exact and fuzzy), cloned plate, convoy, loitering, geofence, wrong-way. Dedup, PostGIS storage, and live fan-out |
-| API | JWT and roles `admin`, `operator`, `analyst`. Trajectory search with required case ID, audit log, fuzzy merge, and impossible-hop flags. Analysts blocked from plate-level trajectory. Heatmap, flow, segments, origin–destination (cells under 5 trips hidden), bottlenecks, anomalies. Alert ack / dispatch / close with crop link when one exists. Camera, zone, and watchlist CRUD, CSV import, audit log, live WebSocket |
-| Dashboard | `/live` heatmap, cameras, congested segments, alert toasts. `/track` plate search and path playback (admin and operator). `/analytics` origin–destination, charts, bottlenecks, anomalies. `/alerts` filter, evidence, acknowledge, dispatch, close. `/admin` cameras, zones, watchlist, audit. Login via httpOnly cookie |
-| OCR engine | Video or RTSP pipeline: detect, track, rectify, CLAHE, recognize, fuse frames, publish. PARSeq when weights are present; mock recognizer for tests. Clear exit if plate-detector weights are missing. Eval harness (`make eval`) and synthetic plate / YOLO dataset generators. A local detector weight can live at `models/plate_det.pt` (gitignored) |
+
+| Area            | What is in place                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared platform | Indian plate grammar (standard and BH), confusion correction, fuzzy matching, and shared schemas for plate reads, alerts, and flow windows                                                                                                                                                                                                                                                                                    |
+| Infrastructure  | Docker stack: Redpanda, ClickHouse, PostGIS, Redis, MinIO. Makefile targets for install, infra, seed, simulate, backfill, tests, and OCR eval                                                                                                                                                                                                                                                                                 |
+| Simulator       | Synthetic 20×20 city (live OpenStreetMap exists in code; Makefile defaults to `--synthetic`). ~60 cameras, zones, 3,000 vehicles, peak-hour trips. Scripted watchlist, cloned plate, convoy, loitering, wrong-way, and restricted-zone cases. Live `60×` mode and historical backfill                                                                                                                                         |
+| Workers         | Ingest with dedup, H3 enrichment, ClickHouse writes, and Redis last-seen. Analytics: 5-minute flow, segment speed, congestion, bottlenecks, volume anomalies, origin–destination counts. Alerts: watchlist (exact and fuzzy), cloned plate, convoy, loitering, geofence, wrong-way. Dedup, PostGIS storage, and live fan-out                                                                                                  |
+| API             | JWT and roles `admin`, `operator`, `analyst`. Trajectory search with required case ID, audit log, fuzzy merge, and impossible-hop flags. Analysts blocked from plate-level trajectory. Heatmap, flow, segments, origin–destination (cells under 5 trips hidden), bottlenecks, anomalies. Alert ack / dispatch / close with crop link when one exists. Camera, zone, and watchlist CRUD, CSV import, audit log, live WebSocket |
+| Dashboard       | `/live` heatmap, cameras, congested segments, alert toasts. `/track` plate search and path playback (admin and operator). `/analytics` origin–destination, charts, bottlenecks, anomalies. `/alerts` filter, evidence, acknowledge, dispatch, close. `/admin` cameras, zones, watchlist, audit. Login via httpOnly cookie                                                                                                     |
+| OCR engine      | Default **PlateOCR** backend ([Ajitesh-07/PlateOCR](https://github.com/Ajitesh-07/PlateOCR) / FastALPR): YOLOv9 plate detect + CCT OCR on ONNX, auto-downloads ~33 MB weights. Multi-frame fusion + Indian grammar. Legacy path: Ultralytics vehicle/plate YOLO + PARSeq when `OCR_BACKEND=legacy`. Eval harness (`make eval`) and synthetic generators. Optional local `models/plate_det.pt` for legacy only |
+
+
+
 
 ### Left
 
-| Area | What is still open |
-|------|--------------------|
-| Plate restoration | Heavy deblur / super-resolution is a no-op behind `Enhancer`. CLAHE and the quality gate are real |
-| Vahan registry | `RegistryClient` always returns unknown, so the plate–vehicle mismatch alert does not fire on real registry data |
-| PARSeq fine-tune | `finetune_parseq` is a template. It logs a config and writes a placeholder file; it does not train |
-| Measured OCR accuracy | Checked-in `reports/ocr_eval.md` is the mock recognizer on 8 fixture images. No measured accuracy on real plates. `PARSEEQ_WEIGHTS` is unset |
-| Real cameras | The demo source is the simulator unless `ocr-engine` is pointed at a file or RTSP URL |
-| Edge and scale | Jetson, Hailo, TensorRT, Flink or Rust consumers, and a ClickHouse cluster are notes only |
-| Production auth | Logins are the demo users in `.env.example` |
-| Docs | README does not yet list public datasets recommended for detector and recognizer pretraining |
+
+| Area                  | What is still open                                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plate restoration     | Heavy deblur / super-resolution is a no-op behind `Enhancer`. CLAHE and the quality gate are real                                            |
+| Vahan registry        | `RegistryClient` always returns unknown, so the plate–vehicle mismatch alert does not fire on real registry data                             |
+| PARSeq fine-tune      | Legacy only. `finetune_parseq` is a template; it does not train. Prefer fine-tuning CCT via [fast-plate-ocr](https://github.com/ankandrew/fast-plate-ocr) for Indian plates |
+| Measured OCR accuracy | Checked-in `reports/ocr_eval.md` is still the **mock** recognizer on 8 fixtures. Run `uv run python -m ocr_engine.eval --recognizer plateocr` on real crops to measure |
+| Real cameras / clips  | PlateOCR fills detect+OCR weights; you still need real video/RTSP (or labelled Indian eval set) pointed at `ocr_engine`                     |
+| Indian plate fine-tune| Default CCT is global (EU/BR/US strong). Indian formats rely on our grammar post-process until fine-tuned on local crops                    |
+| Edge and scale        | Jetson, Hailo, TensorRT, Flink or Rust consumers, and a ClickHouse cluster are notes only                                                    |
+| Production auth       | Logins are the demo users in `.env.example`                                                                                                  |
+
+
+
 
 ## Quickstart
 
@@ -76,17 +88,20 @@ make simulate
 cd apps/dashboard && npx pnpm@9 dev
 ```
 
-Open http://localhost:3000 — login with:
+Open [http://localhost:3000](http://localhost:3000) — login with:
 
-| Role | User | Password |
-|------|------|----------|
-| admin | admin | admin123 |
+
+| Role     | User     | Password    |
+| -------- | -------- | ----------- |
+| admin    | admin    | admin123    |
 | operator | operator | operator123 |
-| analyst | analyst | analyst123 |
+| analyst  | analyst  | analyst123  |
+
 
 If the API is on 8002, set `NEXT_PUBLIC_API_URL=http://localhost:8002` and `NEXT_PUBLIC_WS_URL=ws://localhost:8002/ws/live` before `pnpm dev`.
 
 Demo checklist after `make simulate`:
+
 - `/live` — heatmap, congested segments, alert toasts
 - `/track` — search a watchlist plate from `services/simulator/data/scenarios.json` with a case ID
 - `/alerts` — watchlist / clone / convoy / loiter / geofence / wrong-way
@@ -95,35 +110,45 @@ Demo checklist after `make simulate`:
 
 ## Makefile targets
 
-| Target | Purpose |
-|--------|---------|
-| `make up` / `make down` | Start/stop infra |
-| `make seed` | Seed PostGIS + Redis + scenarios |
-| `make backfill` | Historical reads |
-| `make simulate` | Live simulation at `SIM_SPEED` |
-| `make test` | Unit tests (`RUN_INTEGRATION=1` for e2e) |
-| `make types` | JSON Schema → TypeScript types |
-| `make eval` | OCR eval on bundled synthetic set |
+
+| Target                  | Purpose                                  |
+| ----------------------- | ---------------------------------------- |
+| `make up` / `make down` | Start/stop infra                         |
+| `make seed`             | Seed PostGIS + Redis + scenarios         |
+| `make backfill`         | Historical reads                         |
+| `make simulate`         | Live simulation at `SIM_SPEED`           |
+| `make test`             | Unit tests (`RUN_INTEGRATION=1` for e2e) |
+| `make types`            | JSON Schema → TypeScript types           |
+| `make eval`             | OCR eval on bundled synthetic set        |
+
 
 Use `UV_PROJECT_ENVIRONMENT=.venv311` if the default `.venv` is locked on your machine.
 
 ## Supplying model weights
 
-Weights are **never committed**. Place files under `models/` (gitignored):
+**Default (`OCR_BACKEND=plateocr`):** no local weight files required. On first run FastALPR downloads ONNX models (~33 MB) to:
+
+- `~/.cache/open-image-models/yolo-v9-s-608-license-plate-end2end/`
+- `~/.cache/fast-plate-ocr/cct-s-v2-global-model/`
+
+Reference implementation vendored under `vendor/PlateOCR` from [Ajitesh-07/PlateOCR](https://github.com/Ajitesh-07/PlateOCR).
+
+**Legacy (`OCR_BACKEND=legacy`):** place YOLO plate detector under `models/` (gitignored):
 
 ```bash
+export OCR_BACKEND=legacy
 export PLATE_DET_WEIGHTS=/absolute/path/to/plate_det.pt
 # optional custom PARSeq checkpoint
 export PARSEEQ_WEIGHTS=/absolute/path/to/parseq.pt
 ```
 
-Train a plate detector:
+Train a plate detector (legacy):
 
 ```bash
 uv run python -m ocr_engine.train.train_plate_detector --data path/to/data.yaml
 ```
 
-Fine-tune PARSeq (template):
+Fine-tune PARSeq (legacy template):
 
 ```bash
 uv run python -m ocr_engine.train.finetune_parseq --data-dir data/synth
@@ -135,14 +160,20 @@ Generate synthetic plates:
 uv run python -m ocr_engine.train.synth_plates --out data/synth --count 5000
 ```
 
+
+
 ### Running OCR on your own clips
 
 ```bash
-ocr-engine run --source /path/to/clip.mp4 --camera-id cam-001 --dry-run
-# without --dry-run: publishes to Kafka + MinIO
+# PlateOCR (default) — auto weights, detect+read+grammar
+uv run python -m ocr_engine.cli image --source vendor/PlateOCR/samples/test_image.png --dry-run
+uv run python -m ocr_engine.cli run --source /path/to/clip.mp4 --camera-id cam-001 --dry-run
+
+# Legacy YOLO+PARSeq
+uv run python -m ocr_engine.cli run --source /path/to/clip.mp4 --camera-id cam-001 --backend legacy --dry-run
 ```
 
-If `PLATE_DET_WEIGHTS` is missing, the OCR process exits non-zero with setup instructions. The rest of the platform (simulator path) is unaffected.
+Without `--dry-run`, events publish to Kafka + MinIO. The rest of the platform (simulator path) is unaffected.
 
 GPU profile: `docker compose --profile gpu up ocr-engine-gpu` (NVIDIA runtime). Jetson (TensorRT via ultralytics export) and Hailo are deployment notes only — not bundled.
 
@@ -159,7 +190,7 @@ make eval
 - Report includes confusion pairs and worst failures with timestamp and model identifiers
 - **No fabricated metrics** anywhere — numbers only come from `make eval`
 
-Default harness uses `MockRecognizer` on the bundled synthetic fixture so CI does not need PARSeq weights. For real measurement: `uv run python -m ocr_engine.eval --recognizer parseq`.
+Default harness uses `MockRecognizer` on the bundled synthetic fixture so CI does not need weights. For PlateOCR measurement: `uv run python -m ocr_engine.eval --recognizer plateocr`. Legacy: `--recognizer parseq`.
 
 ## Privacy controls
 
@@ -169,18 +200,26 @@ Default harness uses `MockRecognizer` on the bundled synthetic fixture so CI doe
 - **Retention TTL** — ClickHouse `anpr_reads` TTL = `RAW_RETENTION_DAYS` (default 30)
 - **k-anonymity** — OD API suppresses cells with fewer than `OD_K_ANON` trips
 
+
+
 ## What is stubbed
 
-| Component | Interface | No-op | How to replace |
-|-----------|-----------|-------|----------------|
-| Heavy plate restoration (deblur/SR) | `Enhancer` | `NoopEnhancer` — CLAHE + gating are real | Plug a restoration model into `Enhancer.enhance()` |
-| Vahan plate↔vehicle registry | `RegistryClient` | `NoopRegistryClient` returns unknown | Implement `lookup(plate)` against Vahan; wire into `PlateVehicleMismatchRule` |
+
+| Component                           | Interface        | No-op                                    | How to replace                                                                |
+| ----------------------------------- | ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| Heavy plate restoration (deblur/SR) | `Enhancer`       | `NoopEnhancer` — CLAHE + gating are real | Plug a restoration model into `Enhancer.enhance()`                            |
+| Vahan plate↔vehicle registry        | `RegistryClient` | `NoopRegistryClient` returns unknown     | Implement `lookup(plate)` against Vahan; wire into `PlateVehicleMismatchRule` |
+
+
+
 
 ## Scaling notes
 
 - Replace Python consumers with **Flink** or **Rust** for higher ingest rates; keep the same Kafka schemas
 - Shard **ClickHouse** (`anpr_reads` already partitioned by day) for multi-city retention
 - Edge: run `ocr-engine` on Jetson/Hailo cameras, publish only `PlateRead` events upstream
+
+
 
 ## Repository layout
 

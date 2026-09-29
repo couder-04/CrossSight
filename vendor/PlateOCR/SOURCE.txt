@@ -1,0 +1,2 @@
+Vendored reference from https://github.com/Ajitesh-07/PlateOCR
+Integrated into services/ocr_engine as OCR_BACKEND=plateocr (FastALPR YOLOv9 + CCT ONNX).

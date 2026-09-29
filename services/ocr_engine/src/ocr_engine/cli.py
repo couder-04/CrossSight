@@ -25,12 +25,19 @@ def main() -> None:
 @click.option("--source", required=True, help="Video file path or RTSP URL")
 @click.option("--camera-id", required=True, help="Camera identifier for PlateRead events")
 @click.option("--camera-heading", type=float, default=0.0, help="Camera compass heading in degrees")
+@click.option(
+    "--backend",
+    type=click.Choice(["plateocr", "legacy"], case_sensitive=False),
+    default=None,
+    help="OCR backend (default: OCR_BACKEND env / plateocr)",
+)
 @click.option("--dry-run", is_flag=True, help="Print events instead of publishing to Kafka/MinIO")
 @click.option("--max-frames", type=int, default=None, help="Stop after N frames (debug)")
 def run_cmd(
     source: str,
     camera_id: str,
     camera_heading: float,
+    backend: str | None,
     dry_run: bool,
     max_frames: int | None,
 ) -> None:
@@ -41,6 +48,7 @@ def run_cmd(
         camera_id=camera_id,
         camera_heading_deg=camera_heading,
         dry_run=dry_run,
+        backend=backend,
     )
     try:
         count = pipeline.run(source, max_frames=max_frames)
@@ -54,6 +62,30 @@ def run_cmd(
     except (RuntimeError, OSError, ValueError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+
+
+@main.command("image")
+@click.option("--source", required=True, help="Image file path")
+@click.option("--camera-id", default="cam-demo", help="Camera id for event payload")
+@click.option("--dry-run", is_flag=True, default=True, help="Print JSON (default true)")
+def image_cmd(source: str, camera_id: str, dry_run: bool) -> None:
+    """Single-image PlateOCR smoke test (detect + read + grammar)."""
+    settings = get_settings()
+    pipeline = OCRPipeline(
+        settings=settings,
+        camera_id=camera_id,
+        dry_run=dry_run,
+        backend="plateocr",
+    )
+    try:
+        count = pipeline.run_image(source)
+        click.echo(f"Emitted {count} plate read(s)")
+    except (RuntimeError, OSError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        sys.exit(code)
 
 
 if __name__ == "__main__":
