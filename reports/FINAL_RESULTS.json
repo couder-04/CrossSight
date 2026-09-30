@@ -2,9 +2,10 @@
   "generated_at": "2026-09-30T08:32:58.100613+00:00",
   "notes": [
     "Measured only; no fabricated metrics.",
-    "India default stack: india-v1 + plate_format=india + PLATEOCR_TTA=1 (+ bbox pad on full scenes).",
+    "India default stack: india-v1 + plate_format=india, TTA and bbox pad OFF (row in_crops_india_v1_no_tta). TTA gained +1.0 pt (within the +/-2.2 pt 95% margin at n=1684) for ~7x OCR latency; the *_tta / *_tta_pad rows are kept for reference.",
     "OpenALPR >90% claim uses cct-s-v2-global-model, plate_format=none.",
-    "HF README-only corpora (indian_anpr_corpus, indian_synth_sample) skipped \u2014 no images."
+    "HF README-only corpora (indian_anpr_corpus, indian_synth_sample) skipped — no images.",
+    "in_synth_kaggle_* removed: it scored india-v1 on the abtexp synthetic set it was trained on. All 273 plates of <=10 chars were training images (271 read correctly); all 127 plates of 11 chars cannot be emitted by the 10-slot model (0 correct). The number and the per-state table measured the share of 11-char plates per state, not accuracy. in_crops is the valid held-out Indian test set."
   ],
   "results": [
     {
@@ -88,35 +89,6 @@
       "ms_med": 23.4253330854699,
       "ms_p95": 27.959832921624184,
       "failure_count": 1160
-    },
-    {
-      "tag": "in_synth_kaggle_india_v1_tta",
-      "n": 400,
-      "found": 1.0,
-      "exact": 0.6775,
-      "exact_o0": 0.6775,
-      "char_acc": 0.9617021276595744,
-      "extra": 0,
-      "ms_med": 227.5915420614183,
-      "ms_p95": 280.5904590059072,
-      "by_state": {
-        "Delhi": {
-          "n": 100,
-          "exact": 0.66
-        },
-        "Gujarat": {
-          "n": 100,
-          "exact": 0.77
-        },
-        "Karnataka": {
-          "n": 100,
-          "exact": 0.71
-        },
-        "Maharashtra": {
-          "n": 100,
-          "exact": 0.57
-        }
-      }
     },
     {
       "tag": "in_full_india_v1_tta_pad",
