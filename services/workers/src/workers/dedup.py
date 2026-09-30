@@ -23,12 +23,21 @@ class InMemoryDedup:
         self._seen: OrderedDict[DedupKey, float] = OrderedDict()
 
     def _prune_expired(self, now: float) -> None:
+        """Drop entries older than the window.
+
+        The dict is insertion-ordered, not timestamp-ordered, so a prefix scan
+        misses stale keys inserted during backfill or replay. Scan every entry,
+        capped at max_entries so the work stays bounded.
+        """
         cutoff = now - DEDUP_WINDOW_SEC
-        while self._seen:
-            _key, ts = next(iter(self._seen.items()))
-            if ts >= cutoff:
+        stale: list[DedupKey] = []
+        for index, (key, ts) in enumerate(self._seen.items()):
+            if index >= self._max_entries:
                 break
-            self._seen.popitem(last=False)
+            if ts < cutoff:
+                stale.append(key)
+        for key in stale:
+            self._seen.pop(key, None)
 
     def is_duplicate(self, plate_norm: str, camera_id: str, ts_epoch: float | None = None) -> bool:
         now = ts_epoch if ts_epoch is not None else time.time()

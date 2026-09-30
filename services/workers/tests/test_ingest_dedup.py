@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from workers.dedup import DEDUP_WINDOW_SEC, HybridDedup, InMemoryDedup
+from workers.dedup import DEDUP_WINDOW_SEC, DedupKey, HybridDedup, InMemoryDedup
 from workers.ingest import IngestWorker
 
 
@@ -36,6 +36,23 @@ async def test_in_memory_dedup_expires_after_window():
     t0 = time.time()
     assert dedup.is_duplicate("DL3CAB1234", "cam-1", t0) is False
     assert dedup.is_duplicate("DL3CAB1234", "cam-1", t0 + DEDUP_WINDOW_SEC + 1) is False
+
+
+@pytest.mark.asyncio
+async def test_in_memory_dedup_out_of_order_timestamps():
+    """Stale keys inserted after a newer one must still expire, and in-window hits stay duplicates."""
+    dedup = InMemoryDedup()
+    newer = 2_000.0
+    older = 1_000.0
+    assert dedup.is_duplicate("MH01NEW001", "cam-1", newer) is False
+    assert dedup.is_duplicate("MH01OLD001", "cam-1", older) is False
+    # In-window relative to the older event's own timestamp.
+    assert dedup.is_duplicate("MH01OLD001", "cam-1", older + 5) is True
+    # A later event whose window does not cover the older key must expire it,
+    # even though that key is not at the front of the insertion-ordered dict.
+    assert dedup.is_duplicate("MH01NEW001", "cam-1", newer + 1) is True
+    assert DedupKey(plate_norm="MH01OLD001", camera_id="cam-1") not in dedup._seen
+    assert dedup.is_duplicate("MH01OLD001", "cam-1", newer + 1) is False
 
 
 @pytest.mark.asyncio
