@@ -78,25 +78,38 @@ def build_scenarios(
     chain_ids = [c.id for c in chain]
 
     pairs_data = compute_camera_pairs(graph, cameras)
-    adjacent = [p for p in pairs_data if p["adjacent"] and float(p["distance_m"]) > 800]
-    adjacent.sort(key=lambda p: float(p["distance_m"]), reverse=True)
+    # Prefer the farthest camera pairs so a short gap yields impossible speed.
+    distant = sorted(pairs_data, key=lambda p: float(p["distance_m"]), reverse=True)
+    # Deduplicate by unordered camera pair so we don't reuse the same link.
+    seen_links: set[frozenset[str]] = set()
+    unique_distant: list[dict[str, Any]] = []
+    for p in distant:
+        link = frozenset((p["camera_a"], p["camera_b"]))
+        if link in seen_links:
+            continue
+        seen_links.add(link)
+        unique_distant.append(p)
 
     cloned_pairs: list[dict[str, Any]] = []
     for idx in range(2):
-        if idx * 2 + 1 >= len(adjacent):
+        if idx >= len(unique_distant):
             break
-        pair_a = adjacent[idx * 2]
-        pair_b = adjacent[idx * 2 + 1]
+        pair = unique_distant[idx]
         _, plate, _, _ = generate_unique_plate(rng, used)
         used.add(plate)
+        dist_m = float(pair["distance_m"])
+        # Gap short enough that required speed > max_urban * 1.5 (clone threshold).
+        threshold_kmh = float(_settings.max_urban_speed_kmh) * 1.5
+        max_gap_s = max(5.0, (dist_m * 3.6) / threshold_kmh * 0.5)
         cloned_pairs.append(
             {
                 "plate_norm": plate,
-                "camera_a": pair_a["camera_a"],
-                "camera_b": pair_a["camera_b"],
-                "camera_c": pair_b["camera_a"],
-                "camera_d": pair_b["camera_b"],
-                "gap_minutes": 3,
+                "camera_a": pair["camera_a"],
+                "camera_b": pair["camera_b"],
+                "camera_c": pair["camera_a"],
+                "camera_d": pair["camera_b"],
+                "distance_m": dist_m,
+                "gap_seconds": round(max_gap_s, 1),
                 "description": "Same plate at distant cameras within impossible time",
             }
         )
@@ -249,9 +262,10 @@ def scenario_injections(
             )
         )
 
-    # Cloned plate pairs — two reads minutes apart at distant camera pairs
+    # Cloned plate pairs — two reads at distant cameras with an impossible transit time
     for idx, pair in enumerate(bundle.cloned_pairs):
         t0 = start + timedelta(minutes=12 + idx * 8)
+        gap_s = float(pair.get("gap_seconds") or 15)
         events.append(
             InjectedEvent(
                 plate_norm=pair["plate_norm"],
@@ -265,7 +279,7 @@ def scenario_injections(
             InjectedEvent(
                 plate_norm=pair["plate_norm"],
                 camera_id=pair["camera_b"],
-                ts=t0 + timedelta(minutes=1),
+                ts=t0 + timedelta(seconds=gap_s),
                 tags=["cloned_plate"],
                 force_emit=True,
             )

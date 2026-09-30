@@ -111,24 +111,68 @@ def fetch_custom_model(name: str) -> tuple[Path, Path]:
 
 class FormatOCR(BaseOCR):
     """Wraps fast-alpr's DefaultOCR and decodes the raw per-slot probabilities under a plate
-    grammar (see plate_format.py) instead of taking the argmax per slot."""
+    grammar (see plate_format.py) instead of taking the argmax per slot.
+
+    Optional TTA: average slot probs over cheap crop views (CLAHE / pad / scale / mild deblur).
+    Enable with env PLATEOCR_TTA=1 (default on).
+    """
 
     DECODERS = {"india": decode_india}
 
-    def __init__(self, inner: BaseOCR, plate_format: str) -> None:
+    def __init__(self, inner: BaseOCR, plate_format: str, *, tta: bool | None = None) -> None:
         self.inner = inner
         self.decode = self.DECODERS[plate_format]
         self.rec = inner.ocr_model  # fast_plate_ocr LicensePlateRecognizer
+        if tta is None:
+            tta = os.environ.get("PLATEOCR_TTA", "1").strip().lower() not in ("0", "false", "off", "no")
+        self.tta = tta
 
-    def predict(self, cropped_plate: np.ndarray) -> OcrResult | None:
+    def _slot_probs(self, cropped_plate: np.ndarray) -> np.ndarray | None:
         if cropped_plate is None or cropped_plate.size == 0:
             return None
         cfg = self.rec.config
         code = {"grayscale": cv2.COLOR_BGR2GRAY, "rgb": cv2.COLOR_BGR2RGB}[cfg.image_color_mode]
         x = preprocess_image(_load_image_from_source(cv2.cvtColor(cropped_plate, code), cfg))
         out = self.rec.model.run([self.rec.plate_output_name], {"input": x})[0]
-        probs = out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
-        text, confs = self.decode(probs, cfg.alphabet, cfg.pad_char)
+        return out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
+
+    def _tta_views(self, image: np.ndarray) -> list[np.ndarray]:
+        views = [image]
+        # CLAHE on L channel
+        if image.ndim == 3:
+            lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            l2 = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
+            views.append(cv2.cvtColor(cv2.merge([l2, a, b]), cv2.COLOR_LAB2BGR))
+        h, w = image.shape[:2]
+        ph, pw = max(1, int(h * 0.06)), max(1, int(w * 0.06))
+        views.append(cv2.copyMakeBorder(image, ph, ph, pw, pw, cv2.BORDER_REPLICATE))
+        sh, sw = max(1, int(h * 0.04)), max(1, int(w * 0.04))
+        if sh * 2 < h and sw * 2 < w:
+            views.append(image[sh : h - sh, sw : w - sw])
+        for factor in (0.95, 1.05):
+            nh, nw = max(8, int(h * factor)), max(8, int(w * factor))
+            views.append(cv2.resize(image, (nw, nh), interpolation=cv2.INTER_LINEAR))
+        # mild unsharp on CLAHE
+        base = views[1] if len(views) > 1 else image
+        blur = cv2.GaussianBlur(base, (0, 0), 1.0)
+        views.append(np.clip(cv2.addWeighted(base, 2.1, blur, -1.1, 0), 0, 255).astype(np.uint8))
+        return [v for v in views if v is not None and v.size > 0 and min(v.shape[:2]) >= 8]
+
+    def predict(self, cropped_plate: np.ndarray) -> OcrResult | None:
+        if cropped_plate is None or cropped_plate.size == 0:
+            return None
+        cfg = self.rec.config
+        views = self._tta_views(cropped_plate) if self.tta else [cropped_plate]
+        stacked = []
+        for view in views:
+            probs = self._slot_probs(view)
+            if probs is not None:
+                stacked.append(probs)
+        if not stacked:
+            return None
+        mean = np.mean(np.stack(stacked, axis=0), axis=0)
+        text, confs = self.decode(mean, cfg.alphabet, cfg.pad_char)
         return OcrResult(text=text, confidence=confs)
 
 

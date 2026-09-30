@@ -1,0 +1,6 @@
+Watchlist probes for this run: ['LT01PZ1000', 'LT02PZ1001', 'LT03PZ1002', 'LT04PZ1003', 'LT05PZ1004', 'LT06PZ1005', 'LT07PZ1006', 'LT08PZ1007', 'LT09PZ1008', 'LT10PZ1009']
+Publishing: cameras=60 rate/cam=0.5/s duration=40.0s ≈30 rps aggregate
+Published 1260 in 41.98s (30.0/s) — draining 25.0s…
+ingest p95=1.246s recovery=100.0% cams=60/60 | alert p95=0.5131s n=10 | fairness_cv=0.000
+Overall: PASS
+Wrote /Users/par_04/code_playground/sih/reports/city_load.md

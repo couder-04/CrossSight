@@ -22,6 +22,7 @@ from typing import Any
 
 import numpy as np
 
+from ocr_engine.enhance import tta_views
 from ocr_engine.plate_format import decode_india
 from ocr_engine.recognize import RecognitionResult, Recognizer
 
@@ -29,6 +30,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DETECTOR = "yolo-v9-s-608-license-plate-end2end"
 DEFAULT_OCR = "india-v1"
+
+# Inference-only accuracy levers (no retrain / no new labels). Override via env.
+_TTA_DEFAULT = os.environ.get("PLATEOCR_TTA", "1").strip().lower() not in ("0", "false", "off", "no")
+_BBOX_PAD_DEFAULT = os.environ.get("PLATEOCR_BBOX_PAD", "1").strip().lower() not in (
+    "0",
+    "false",
+    "off",
+    "no",
+)
 
 RELEASES_URL = "https://github.com/Ajitesh-07/PlateOCR/releases/download"
 CUSTOM_OCR_MODELS: dict[str, dict[str, Any]] = {
@@ -109,20 +119,22 @@ def fetch_custom_model(name: str) -> tuple[Path, Path]:
 
 
 class FormatOCR:
-    """Wraps fast-alpr DefaultOCR; decodes slot probs under Indian plate grammar."""
+    """Wraps fast-alpr DefaultOCR; decodes slot probs under Indian plate grammar.
+
+    When ``tta=True`` (default via PLATEOCR_TTA), averages softmax over cheap crop
+    views (CLAHE / pad / scale / mild deblur) before format decode.
+    """
 
     DECODERS = {"india": decode_india}
 
-    def __init__(self, inner: Any, plate_format: str) -> None:
-        from fast_alpr.base import BaseOCR  # noqa: F401 — type hint only at runtime
-
+    def __init__(self, inner: Any, plate_format: str, *, tta: bool = _TTA_DEFAULT) -> None:
         self.inner = inner
         self.decode = self.DECODERS[plate_format]
         self.rec = inner.ocr_model  # fast_plate_ocr LicensePlateRecognizer
+        self.tta = tta
 
-    def predict(self, cropped_plate: np.ndarray) -> Any:
+    def _slot_probs(self, cropped_plate: np.ndarray) -> np.ndarray | None:
         import cv2
-        from fast_alpr.base import OcrResult
         from fast_plate_ocr.core.process import preprocess_image
         from fast_plate_ocr.inference.plate_recognizer import _load_image_from_source
 
@@ -132,8 +144,27 @@ class FormatOCR:
         code = {"grayscale": cv2.COLOR_BGR2GRAY, "rgb": cv2.COLOR_BGR2RGB}[cfg.image_color_mode]
         x = preprocess_image(_load_image_from_source(cv2.cvtColor(cropped_plate, code), cfg))
         out = self.rec.model.run([self.rec.plate_output_name], {"input": x})[0]
-        probs = out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
-        text, confs = self.decode(probs, cfg.alphabet, cfg.pad_char)
+        return out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
+
+    def predict(self, cropped_plate: np.ndarray, *, light_tta: bool = False) -> Any:
+        from fast_alpr.base import OcrResult
+
+        if cropped_plate is None or cropped_plate.size == 0:
+            return None
+        cfg = self.rec.config
+        if self.tta:
+            views = tta_views(cropped_plate, light=light_tta)
+        else:
+            views = [cropped_plate]
+        stacked: list[np.ndarray] = []
+        for view in views:
+            probs = self._slot_probs(view)
+            if probs is not None:
+                stacked.append(probs)
+        if not stacked:
+            return None
+        mean = np.mean(np.stack(stacked, axis=0), axis=0)
+        text, confs = self.decode(mean, cfg.alphabet, cfg.pad_char)
         return OcrResult(text=text, confidence=confs)
 
 
@@ -211,6 +242,8 @@ class PlateOCRReader:
 
         self.min_ocr_conf = min_ocr_conf
         self.plate_format = plate_format
+        self.tta = _TTA_DEFAULT
+        self.bbox_pad = _BBOX_PAD_DEFAULT
         providers = _pick_providers(device)
         self._alpr = self._build(ALPR, detector_model, ocr_model, ocr_config, det_conf, providers)
         try:
@@ -223,16 +256,18 @@ class PlateOCRReader:
             self._alpr = self._build(ALPR, detector_model, ocr_model, ocr_config, det_conf, providers)
             _self_test(self._alpr)
         if plate_format:
-            self._alpr.ocr = FormatOCR(self._alpr.ocr, plate_format)
+            self._alpr.ocr = FormatOCR(self._alpr.ocr, plate_format, tta=self.tta)
         self.providers = providers
         self.detector_model = detector_model
         self.ocr_model = ocr_model
         self.ocr_config = ocr_config
         logger.info(
-            "PlateOCR ready (det=%s ocr=%s format=%s provider=%s)",
+            "PlateOCR ready (det=%s ocr=%s format=%s tta=%s pad=%s provider=%s)",
             detector_model,
             Path(ocr_model).name if ocr_model.endswith(".onnx") else ocr_model,
             plate_format or "none",
+            self.tta,
+            self.bbox_pad,
             providers[0],
         )
 
@@ -278,40 +313,57 @@ class PlateOCRReader:
         else:
             img = image
 
+        h, w = img.shape[:2]
         hits: list[PlateHit] = []
-        for r in self._alpr.predict(img):
-            if r.ocr is None or not r.ocr.text:
+        # Detector-only then OCR tournament — avoids double full-TTA via ALPR.predict.
+        detections = self._alpr.detector.predict(img)
+        for detection in detections:
+            b = detection.bounding_box
+            x1, y1, x2, y2 = int(b.x1), int(b.y1), int(b.x2), int(b.y2)
+            crop_specs: list[tuple[int, int, int, int]] = [(x1, y1, x2, y2)]
+            if self.bbox_pad:
+                bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+                for pct in (0.08, 0.15, -0.05):
+                    dx, dy = int(bw * abs(pct)), int(bh * abs(pct))
+                    if pct >= 0:
+                        crop_specs.append((x1 - dx, y1 - dy, x2 + dx, y2 + dy))
+                    else:
+                        crop_specs.append((x1 + dx, y1 + dy, x2 - dx, y2 - dy))
+
+            best_text, best_conf, best_probs = "", -1.0, []
+            for i, (cx1, cy1, cx2, cy2) in enumerate(crop_specs):
+                ax1, ay1 = max(0, cx1), max(0, cy1)
+                ax2, ay2 = min(w, cx2), min(h, cy2)
+                if ax2 - ax1 < 8 or ay2 - ay1 < 8:
+                    continue
+                crop = img[ay1:ay2, ax1:ax2]
+                # Full TTA on tight crop; light TTA on padded variants.
+                text, ocr_conf, char_probs = self.read_crop(crop, light_tta=(i > 0))
+                if text and ocr_conf > best_conf:
+                    best_text, best_conf, best_probs = text, ocr_conf, char_probs
+
+            if not best_text or best_conf < self.min_ocr_conf:
                 continue
-            conf = r.ocr.confidence
-            if isinstance(conf, list):
-                char_probs = [float(c) for c in conf]
-                ocr_conf = float(statistics.mean(char_probs)) if char_probs else 0.0
-            else:
-                ocr_conf = float(conf)
-                char_probs = [ocr_conf]
-            if ocr_conf < self.min_ocr_conf:
-                continue
-            text = r.ocr.text.replace("_", "").strip().upper()
-            text = "".join(ch for ch in text if ch.isalnum())
-            if not text:
-                continue
-            b = r.detection.bounding_box
             hits.append(
                 PlateHit(
-                    text=text,
-                    ocr_confidence=round(ocr_conf, 4),
-                    det_confidence=round(float(r.detection.confidence), 4),
-                    bbox=(int(b.x1), int(b.y1), int(b.x2), int(b.y2)),
-                    region=getattr(r.ocr, "region", None),
-                    region_confidence=getattr(r.ocr, "region_confidence", None),
-                    char_probs=char_probs,
+                    text=best_text,
+                    ocr_confidence=round(best_conf, 4),
+                    det_confidence=round(float(detection.confidence), 4),
+                    bbox=(x1, y1, x2, y2),
+                    char_probs=best_probs,
                 )
             )
         return hits
 
-    def read_crop(self, plate_img: np.ndarray) -> tuple[str, float, list[float]]:
+    def read_crop(
+        self, plate_img: np.ndarray, *, light_tta: bool = False
+    ) -> tuple[str, float, list[float]]:
         """OCR-only for an already-cropped plate. Returns (text, mean_conf, char_probs)."""
-        r = self._alpr.ocr.predict(plate_img)
+        ocr = self._alpr.ocr
+        if isinstance(ocr, FormatOCR):
+            r = ocr.predict(plate_img, light_tta=light_tta)
+        else:
+            r = ocr.predict(plate_img)
         if r is None or not r.text:
             return "", 0.0, []
         if isinstance(r.confidence, list):
@@ -323,8 +375,6 @@ class PlateOCRReader:
         text = r.text.replace("_", "").strip().upper()
         text = "".join(ch for ch in text if ch.isalnum())
         return text, conf, char_probs
-
-
 class PlateOCRRecognizer(Recognizer):
     """Recognizer adapter: runs full ALPR on a crop (or whole image)."""
 

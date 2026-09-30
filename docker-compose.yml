@@ -118,6 +118,7 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     profiles: ["app"]
+    restart: unless-stopped
     env_file: .env
     environment:
       KAFKA_BOOTSTRAP: redpanda:9092
@@ -127,6 +128,12 @@ services:
       MINIO_ENDPOINT: minio:9000
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       redpanda:
         condition: service_healthy
@@ -139,17 +146,111 @@ services:
       minio:
         condition: service_healthy
 
+  # Monolith workers (demo). Prefer split services below for city-scale.
   workers:
     build:
       context: .
       dockerfile: services/workers/Dockerfile
     profiles: ["app"]
+    restart: unless-stopped
     env_file: .env
     environment:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  workers-ingest:
+    build:
+      context: .
+      dockerfile: services/workers/Dockerfile
+    profiles: ["app", "prod"]
+    restart: unless-stopped
+    command: ["python", "-m", "workers.cli", "run", "--worker", "ingest"]
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      CLICKHOUSE_HOST: clickhouse
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+      HEALTH_PORT: "8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  workers-analytics:
+    build:
+      context: .
+      dockerfile: services/workers/Dockerfile
+    profiles: ["app", "prod"]
+    restart: unless-stopped
+    command: ["python", "-m", "workers.cli", "run", "--worker", "analytics"]
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      CLICKHOUSE_HOST: clickhouse
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+      HEALTH_PORT: "8082"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Scale: docker compose --profile prod up -d --scale workers-alerts=3
+  workers-alerts:
+    build:
+      context: .
+      dockerfile: services/workers/Dockerfile
+    profiles: ["app", "prod"]
+    restart: unless-stopped
+    command: ["python", "-m", "workers.cli", "run", "--worker", "alerts"]
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      CLICKHOUSE_HOST: clickhouse
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+      HEALTH_PORT: "8083"
+      ALERTS_GROUP_ID: anpr-alerts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       redpanda-init:
         condition: service_completed_successfully

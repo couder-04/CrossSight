@@ -394,17 +394,15 @@ class OCRPipeline:
             enhanced_text = hit.text
             if crop.size:
                 enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
-                # Re-OCR enhanced crop only when gate fired (quality/conf low) via enhancer path.
-                # PlateOCR already OCR'd the raw crop; keep text but store enhanced crop for upload.
-                if quality < 0.45 or hit.ocr_confidence < 0.65:
-                    try:
-                        re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
-                        if re_text and re_conf >= hit.ocr_confidence:
-                            enhanced_text = re_text
-                            probs = re_probs or [re_conf] * max(1, len(re_text))
-                            quality = max(quality, float(re_conf))
-                    except Exception:
-                        logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
+                # Always dual-pass: keep enhanced OCR when confidence is at least as good.
+                try:
+                    re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
+                    if re_text and re_conf >= hit.ocr_confidence - 1e-6:
+                        enhanced_text = re_text
+                        probs = re_probs or [re_conf] * max(1, len(re_text))
+                        quality = max(quality, float(re_conf))
+                except Exception:
+                    logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
                 if quality >= state.best_quality:
                     state.best_quality = quality
                     state.best_crop = enhanced.copy()

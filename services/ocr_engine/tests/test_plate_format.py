@@ -1,7 +1,11 @@
 """Tests for Indian plate-format constrained decoding."""
 
 import numpy as np
-from ocr_engine.plate_format import INDIA_STATE_CODES, decode_india
+from ocr_engine.plate_format import (
+    INDIA_STATE_CODES,
+    decode_india,
+    remix_lookalike_probs,
+)
 
 
 def _one_hot_probs(text: str, alphabet: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", slots: int = 10):
@@ -29,10 +33,8 @@ def test_decode_india_bh_series():
 
 
 def test_decode_india_prefers_valid_state_over_garbage():
-    # Slot 0–1 slightly prefer invalid "KH", but MH is close — decoder must pick a real state.
     alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
     probs = _one_hot_probs("MH12AB1234", alphabet)
-    # Boost K a bit on slot 0 so argmax alone might pick KH — format decoder still picks MH.
     probs[0, alphabet.index("K")] = 0.4
     probs[0, alphabet.index("M")] = 0.55
     probs[0] /= probs[0].sum()
@@ -44,3 +46,18 @@ def test_decode_india_prefers_valid_state_over_garbage():
 def test_tg_in_state_codes():
     assert "TG" in INDIA_STATE_CODES
     assert "TS" in INDIA_STATE_CODES
+
+
+def test_remix_boosts_digit_from_q():
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+    probs = np.full((1, len(alphabet)), 1e-4, dtype=np.float64)
+    probs[0, alphabet.index("Q")] = 0.6
+    probs[0, alphabet.index("0")] = 0.2
+    probs[0] /= probs[0].sum()
+    remixed = remix_lookalike_probs(probs, alphabet, strength=0.5)
+    assert remixed[0, alphabet.index("0")] > probs[0, alphabet.index("0")]
+
+
+def test_decode_india_three_digit_serial():
+    text, _ = decode_india(_one_hot_probs("KL34A465"), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", "_")
+    assert text == "KL34A465"

@@ -14,20 +14,22 @@
   "cloned_pairs": [
     {
       "plate_norm": "GJ116601",
-      "camera_a": "cam-007",
-      "camera_b": "cam-025",
-      "camera_c": "cam-025",
-      "camera_d": "cam-007",
-      "gap_minutes": 3,
+      "camera_a": "cam-043",
+      "camera_b": "cam-060",
+      "camera_c": "cam-043",
+      "camera_d": "cam-060",
+      "distance_m": 6045.205006313644,
+      "gap_seconds": 60.5,
       "description": "Same plate at distant cameras within impossible time"
     },
     {
       "plate_norm": "MH39J5753",
-      "camera_a": "cam-052",
-      "camera_b": "cam-056",
-      "camera_c": "cam-056",
-      "camera_d": "cam-052",
-      "gap_minutes": 3,
+      "camera_a": "cam-010",
+      "camera_b": "cam-060",
+      "camera_c": "cam-010",
+      "camera_d": "cam-060",
+      "distance_m": 6041.172991645726,
+      "gap_seconds": 60.4,
       "description": "Same plate at distant cameras within impossible time"
     }
   ],
@@ -55,9 +57,9 @@
     "plate_norm": "JH14NG1454",
     "zone_id": "sensitive-1",
     "camera_ids": [
-      "cam-002",
-      "cam-013",
-      "cam-005"
+      "cam-022",
+      "cam-023",
+      "cam-049"
     ],
     "passes": 6,
     "window_minutes": 45
@@ -65,8 +67,8 @@
   "wrong_way": {
     "plate_norm": "UK53771",
     "camera_id": "cam-021",
-    "allowed_direction": "S",
-    "reported_direction": "N"
+    "allowed_direction": "W",
+    "reported_direction": "E"
   },
   "restricted_zone": {
     "plate_norm": "UP88KE2394",
@@ -107,5 +109,5 @@
       "UP88KE2394"
     ]
   },
-  "generated_at": "2026-09-29T13:32:15.112037+00:00"
+  "generated_at": "2026-09-30T07:32:08.568939+00:00"
 }

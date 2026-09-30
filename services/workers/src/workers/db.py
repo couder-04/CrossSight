@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -240,9 +241,52 @@ async def load_watchlist(pool: asyncpg.Pool) -> set[str]:
     return {r["plate_norm"] for r in rows}
 
 
-async def persist_alert(pool: asyncpg.Pool, alert: dict[str, Any]) -> None:
-    import json
+async def load_zone_membership(
+    pool: asyncpg.Pool,
+) -> tuple[dict[str, str], dict[str, tuple[str, dict[str, Any]]]]:
+    """Batch-load camera→zone maps (avoids per-read PostGIS).
 
+    Returns:
+      sensitive: camera_id → zone_id (300m buffer)
+      restricted: camera_id → (zone_id, active_hours)
+    """
+    sensitive_rows = await pool.fetch(
+        """
+        SELECT DISTINCT ON (c.id) c.id AS camera_id, z.id AS zone_id
+        FROM cameras c
+        JOIN zones z ON z.kind = 'sensitive'
+          AND ST_DWithin(z.geom::geography, c.geom::geography, 300)
+        ORDER BY c.id, z.id
+        """
+    )
+    sensitive = {r["camera_id"]: r["zone_id"] for r in sensitive_rows}
+
+    restricted_rows = await pool.fetch(
+        """
+        SELECT DISTINCT ON (c.id) c.id AS camera_id, z.id AS zone_id, z.active_hours
+        FROM cameras c
+        JOIN zones z ON z.kind = 'restricted'
+          AND ST_Contains(z.geom, c.geom)
+        ORDER BY c.id, z.id
+        """
+    )
+    restricted: dict[str, tuple[str, dict[str, Any]]] = {}
+    for r in restricted_rows:
+        hours = r["active_hours"] or {}
+        if isinstance(hours, str):
+            try:
+                hours = json.loads(hours)
+            except (json.JSONDecodeError, TypeError):
+                hours = {}
+        if not isinstance(hours, dict):
+            hours = {}
+        restricted[r["camera_id"]] = (r["zone_id"], hours)
+    return sensitive, restricted
+
+
+async def persist_alert(pool: asyncpg.Pool, alert: dict[str, Any]) -> None:
+    # created_at / updated_at = wall clock (ops latency); event time stays in evidence
+    now = datetime.now(UTC)
     await pool.execute(
         """
         INSERT INTO alerts (
@@ -261,7 +305,7 @@ async def persist_alert(pool: asyncpg.Pool, alert: dict[str, Any]) -> None:
         json.dumps(alert.get("evidence", {})),
         alert.get("status", "new"),
         alert.get("needs_verification", False),
-        alert.get("ts", datetime.now(UTC)),
+        now,
     )
 
 

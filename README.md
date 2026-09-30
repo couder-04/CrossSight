@@ -54,12 +54,33 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 | Learned SR / deblur | Classical deblur is live; swap in a trained model via `Enhancer` |
 | Vahan registry | Set `REGISTRY_PATH` for local JSON demos; live Vahan client still needed for production |
 | PARSeq fine-tune | Legacy template only — prefer CCT fine-tune for Indian plates |
-| Measured OCR accuracy | CI uses mock recognizer; run `make eval-plateocr` on real crops (never fabricate >90%) |
+| Hard-condition India GT | India crops **74.0%** (+TTA) / scenes **60%** exact (**96%** found) — still short of >90%; labelled multi-lane night/rain India still needed |
 | Real cameras | Fleet config is ready — point it at your RTSP/files |
 | Global multi-region OCR | Default is india-v1; switch to `cct-s-v2-global-model` when needed |
 | Edge and scale | Jetson/Hailo/TensorRT/Flink/CH cluster are notes only |
 | Production auth | Demo users in `.env.example` |
 
+
+## Measured OCR claims (2026-09-30)
+
+Full tables: [`reports/ocr_benchmark.md`](reports/ocr_benchmark.md) · narrative: [`reports/CLAIMS.md`](reports/CLAIMS.md) · reproduce: `uv run python scripts/run_ocr_benchmarks.py`
+
+| Claim | Model | Dataset | Exact | Found | Char | n |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| **>90% multi-region OCR** | `cct-s-v2-global-model` | OpenALPR EU+BR+US | **91.7%** | **100%** | **98.1%** | 444 |
+| India OCR (default + TTA) | `india-v1` + format + TTA | Zenitsu crops ~30 states | **74.0%** | **100%** | **93.3%** | 1,684 |
+| India OCR (no TTA) | `india-v1` + format | Zenitsu crops | 73.0% | 100% | 92.9% | 1,684 |
+| India OCR (synthetic) | `india-v1` + format + TTA | Kaggle synth private MH/KA/DL/GJ | **67.8%** | **100%*** | **96.2%** | 400 |
+| India detect+OCR (+ pad/TTA) | `india-v1` + format | Datacluster full scenes | **60.0%** | **96%** | 77.1% | 25 |
+| India without fine-tune | global CCT | Zenitsu crops | 31.1% | 100% | 77.3% | 1,684 |
+
+\*crop-only (no detector). Full tables: [`reports/FINAL_RESULTS.md`](reports/FINAL_RESULTS.md).
+
+**Notes (measured, not marketing):**
+
+- The **>90%** claim is validated on OpenALPR (real cars, EU/Brazil/US). EU **92.6%**, Brazil **98.2%**, US **87.8%**.
+- For **Indian** plates, default is `india-v1` + TTA (**74.0%** exact on 1,684 crops). Still **not** a >90% India claim. `PLATEOCR_TTA=0` → **73.0%** at ~33 ms/crop.
+- Multi-lane / night / rain **Indian gantry** >90% is **not** claimed (no labelled set).
 
 ## Quickstart
 
@@ -115,6 +136,11 @@ Demo checklist after `make simulate`:
 | `make eval`             | OCR eval on bundled synthetic set (mock recognizer) |
 | `make eval-plateocr`    | OCR eval with real PlateOCR weights                 |
 | `make fleet-ocr`        | Multi-camera OCR dry-run from example fleet config  |
+| `make benchmark-ocr`    | Full OpenALPR + India dataset OCR benchmark → `reports/` |
+| `make prove-scenarios`  | Offline alert-rules proof vs scenarios.json         |
+| `make city-load`        | Multi-cam load + latency → `reports/city_load.*`    |
+| `make ops-check`        | Worker health + Kafka consumer lag                  |
+| `make prod-up`          | Split workers + scaled alerts (`ALERTS_REPLICAS`)   |
 
 
 Use `UV_PROJECT_ENVIRONMENT=.venv311` if the default `.venv` is locked on your machine.
@@ -221,6 +247,7 @@ Default harness uses `MockRecognizer` on the bundled synthetic fixture so CI doe
 - Replace Python consumers with **Flink** or **Rust** for higher ingest rates; keep the same Kafka schemas
 - Shard **ClickHouse** (`anpr_reads` already partitioned by day) for multi-city retention
 - Edge: run `ocr-engine` on Jetson/Hailo cameras, publish only `PlateRead` events upstream
+- **Alerts (city-scale):** zone membership is cached in-process (refreshed ~60s); convoy uses plate→camera Redis indexes; alert dedupe + loiter counts are Redis-backed so you can run multiple alert workers in one Kafka group. Scale with `ALERTS_REPLICAS=3 make prod-up` (or `docker compose --profile prod up --scale workers-alerts=3`). Check lag with `make ops-check`; if alerts fall behind, seek to tip only after accepting lost catch-up: `rpk group seek anpr-alerts --to end --topics anpr.reads.v1`
 
 
 

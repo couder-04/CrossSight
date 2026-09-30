@@ -87,6 +87,16 @@ class Settings(BaseSettings):
         alias="PLATEOCR_PLATE_FORMAT",
         description="india | none | empty (auto from model). India fine-tune defaults to india.",
     )
+    plateocr_tta: bool = Field(
+        default=True,
+        alias="PLATEOCR_TTA",
+        description="Average OCR slot probs over CLAHE/pad/scale views before India decode.",
+    )
+    plateocr_bbox_pad: bool = Field(
+        default=True,
+        alias="PLATEOCR_BBOX_PAD",
+        description="Try padded/shrunk detector crops and keep the best OCR read.",
+    )
     registry_path: str = Field(default="", alias="REGISTRY_PATH")
     route_anomaly_min_cameras: int = Field(default=3, alias="ROUTE_ANOMALY_MIN_CAMERAS")
     route_anomaly_distance_m: float = Field(default=8000.0, alias="ROUTE_ANOMALY_DISTANCE_M")

@@ -439,6 +439,9 @@ class DefaultRuleContext:
         pairs: list[CameraPair],
         redis: Any,
         pg_pool: Any,
+        *,
+        sensitive_zones: dict[str, str] | None = None,
+        restricted_zones: dict[str, tuple[str, dict]] | None = None,
     ) -> None:
         self.settings = settings
         self.cameras = cameras
@@ -448,7 +451,17 @@ class DefaultRuleContext:
         self.pair_distances: dict[tuple[str, str], float] = {
             (p.camera_a, p.camera_b): p.distance_m for p in pairs
         }
+        self.sensitive_zones: dict[str, str] = dict(sensitive_zones or {})
+        self.restricted_zones: dict[str, tuple[str, dict]] = dict(restricted_zones or {})
         self._loiter_counts: dict[tuple[str, str], list[datetime]] = defaultdict(list)
+
+    def set_zone_cache(
+        self,
+        sensitive: dict[str, str],
+        restricted: dict[str, tuple[str, dict]],
+    ) -> None:
+        self.sensitive_zones = dict(sensitive)
+        self.restricted_zones = dict(restricted)
 
     async def last_seen(self, plate_norm: str) -> tuple[str, datetime, float] | None:
         data = await self.redis.hgetall(f"lastseen:{plate_norm.upper()}")
@@ -463,6 +476,7 @@ class DefaultRuleContext:
     async def convoy_peers(
         self, plate_norm: str, camera_id: str, ts: datetime
     ) -> set[str]:
+        """Find co-travellers using plate→camera indexes (not O(|cameras|))."""
         zkey = f"convoy:cam:{camera_id}"
         min_score = ts.timestamp() - CONVOY_TIME_WINDOW_SEC
         max_score = ts.timestamp() + CONVOY_TIME_WINDOW_SEC
@@ -472,10 +486,18 @@ class DefaultRuleContext:
         if len(peers) < 2:
             return set()
         lookback = ts.timestamp() - CONVOY_LOOKBACK_MIN * 60
+        plate_cams = await self.redis.zrangebyscore(f"convoy:plate:{plate}", lookback, "+inf")
+        plate_cam_set = set(plate_cams)
+        if len(plate_cam_set) < CONVOY_MIN_COMMON_CAMERAS:
+            return set()
         common: set[str] = set()
         for peer in peers:
+            peer_cams = await self.redis.zrangebyscore(f"convoy:plate:{peer}", lookback, "+inf")
+            shared_cams = plate_cam_set.intersection(peer_cams)
+            if len(shared_cams) < CONVOY_MIN_COMMON_CAMERAS:
+                continue
             shared = 0
-            for cam_id in self.cameras:
+            for cam_id in shared_cams:
                 z = f"convoy:cam:{cam_id}"
                 a = await self.redis.zscore(z, plate)
                 b = await self.redis.zscore(z, peer)
@@ -487,25 +509,46 @@ class DefaultRuleContext:
                     and abs(a - b) <= CONVOY_TIME_WINDOW_SEC
                 ):
                     shared += 1
-            if shared >= CONVOY_MIN_COMMON_CAMERAS:
-                common.add(peer)
+                    if shared >= CONVOY_MIN_COMMON_CAMERAS:
+                        common.add(peer)
+                        break
         return common
 
     async def sensitive_zone_id(self, camera_id: str) -> str | None:
+        if camera_id in self.sensitive_zones:
+            return self.sensitive_zones[camera_id]
+        if self.pg_pool is None:
+            return None
+        # Fallback to PostGIS if cache cold (e.g. new camera)
         from workers.db import camera_in_zone
 
-        return await camera_in_zone(self.pg_pool, camera_id, "sensitive")
+        zone_id = await camera_in_zone(self.pg_pool, camera_id, "sensitive")
+        if zone_id:
+            self.sensitive_zones[camera_id] = zone_id
+        return zone_id
 
     async def restricted_zone(self, camera_id: str) -> tuple[str, dict] | None:
+        if camera_id in self.restricted_zones:
+            return self.restricted_zones[camera_id]
+        if self.pg_pool is None:
+            return None
         from workers.db import camera_in_restricted_zone
 
-        return await camera_in_restricted_zone(self.pg_pool, camera_id)
+        zone = await camera_in_restricted_zone(self.pg_pool, camera_id)
+        if zone:
+            self.restricted_zones[camera_id] = zone
+        return zone
 
     async def plate_sightings_in_zone(
         self, plate_norm: str, zone_id: str, since: datetime, at: datetime | None = None
     ) -> int:
-        key = (plate_norm.upper(), zone_id)
-        times = self._loiter_counts[key]
-        times.append(at or datetime.now(UTC))
-        self._loiter_counts[key] = [t for t in times if t >= since]
-        return len(self._loiter_counts[key])
+        """Redis-backed so multi-replica alert workers share loiter state."""
+        at = at or datetime.now(UTC)
+        plate = plate_norm.upper()
+        key = f"loiter:{plate}:{zone_id}"
+        score = at.timestamp()
+        await self.redis.zadd(key, {f"{score}:{at.microsecond}": score})
+        await self.redis.expire(key, LOITERING_WINDOW_MIN * 60 + 60)
+        # Drop old entries and count
+        await self.redis.zremrangebyscore(key, 0, since.timestamp() - 0.001)
+        return int(await self.redis.zcount(key, since.timestamp(), "+inf"))
