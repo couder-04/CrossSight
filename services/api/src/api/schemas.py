@@ -125,6 +125,11 @@ class DispatchBody(BaseModel):
     dispatched_to: str
 
 
+class ReviewBody(BaseModel):
+    status: Literal["reviewing", "approved", "dismissed", "closed"]
+    note: str | None = None
+
+
 class AuditEntryOut(BaseModel):
     id: int
     user_id: str | None

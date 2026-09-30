@@ -59,6 +59,8 @@ def _read_to_ch_row(read: PlateRead, h3_r8: int, h3_r7: int) -> dict[str, Any]:
         "source": read.source,
         "h3_r8": h3_r8,
         "h3_r7": h3_r7,
+        "track_id": read.track_id,
+        "bbox": list(read.bbox or []),
     }
 
 
@@ -134,6 +136,23 @@ class IngestWorker:
             },
         )
         await self._redis.publish(
+            "reads",
+            json.dumps(
+                {
+                    "camera_id": read.camera_id,
+                    "plate_norm": plate,
+                    "confidence": read.confidence,
+                    "vehicle_class": read.vehicle_class.value,
+                    "track_id": read.track_id,
+                    "bbox": read.bbox,
+                    "lane": read.lane,
+                    "direction": read.direction.value if read.direction else None,
+                    "crop_key": read.crop_key,
+                    "ts": read.ts.isoformat(),
+                }
+            ),
+        )
+        await self._redis.publish(
             "heatmap",
             json.dumps(
                 {
@@ -171,6 +190,7 @@ class IngestWorker:
         await self._health.start()
         self._redis = await create_redis(self.settings)
         self._ch = ClickHouseClient(self.settings)
+        await self._ch.ensure_schema_async()
         memory = InMemoryDedup()
         redis_dedup = RedisDedup(self._redis)
         self._dedup = HybridDedup(memory, redis_dedup)

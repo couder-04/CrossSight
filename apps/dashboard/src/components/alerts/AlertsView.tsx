@@ -80,6 +80,20 @@ export function AlertsView() {
     }
   }
 
+  async function review(next: "reviewing" | "approved" | "dismissed" | "closed") {
+    if (!selected?.id) return;
+    setActionLoading(true);
+    try {
+      const updated = await api.reviewAlert(selected.id, next, closeNote || "reviewed");
+      setSelected(updated);
+      setAlerts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Review failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function runAction(action: "ack" | "dispatch" | "close") {
     if (!selected?.id) return;
     const alertId = selected.id;
@@ -136,6 +150,9 @@ export function AlertsView() {
             <option value="acknowledged">Acknowledged</option>
             <option value="dispatched">Dispatched</option>
             <option value="closed">Closed</option>
+            <option value="reviewing">Reviewing</option>
+            <option value="approved">Approved</option>
+            <option value="dismissed">Dismissed</option>
           </Select>
           <Select label="Type" value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">All</option>
@@ -147,6 +164,8 @@ export function AlertsView() {
             <option value="wrong_way">Wrong way</option>
             <option value="route_anomaly">Route anomaly</option>
             <option value="plate_vehicle_mismatch">Plate/vehicle mismatch</option>
+            <option value="stopped_vehicle">Stopped vehicle</option>
+            <option value="camera_health">Camera health</option>
           </Select>
           <Select label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value)}>
             <option value="">All</option>
@@ -219,8 +238,11 @@ export function AlertsView() {
           </div>
 
           <div className="p-4 border-t border-border space-y-2">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={actionLoading} onClick={() => runAction("ack")}>Acknowledge</Button>
+              <Button size="sm" variant="secondary" disabled={actionLoading} onClick={() => review("reviewing")}>Review</Button>
+              <Button size="sm" variant="secondary" disabled={actionLoading || !closeNote.trim()} onClick={() => review("approved")}>Approve</Button>
+              <Button size="sm" variant="secondary" disabled={actionLoading || !closeNote.trim()} onClick={() => review("dismissed")}>Dismiss</Button>
             </div>
             <Input
               label="Dispatch to"

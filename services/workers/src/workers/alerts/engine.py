@@ -27,6 +27,7 @@ from workers.alerts.rules import (
     PlateVehicleMismatchRule,
     RouteAnomalyRule,
     Rule,
+    StoppedVehicleRule,
     WatchlistRule,
     WrongWayRule,
 )
@@ -35,6 +36,7 @@ from workers.db import (
     create_redis,
     load_camera_pairs,
     load_cameras,
+    load_dwell_overrides,
     load_watchlist,
     load_zone_membership,
     persist_alert,
@@ -87,6 +89,7 @@ def build_rules(registry: RegistryClient | None = None) -> list[Rule]:
         WrongWayRule(),
         PlateVehicleMismatchRule(reg),
         RouteAnomalyRule(),
+        StoppedVehicleRule(),
     ]
 
 
@@ -121,6 +124,7 @@ class AlertsWorker:
         pairs = await load_camera_pairs(self._pg_pool, adjacent_only=False)
         watchlist = await load_watchlist(self._pg_pool)
         sensitive, restricted = await load_zone_membership(self._pg_pool)
+        dwell_overrides = await load_dwell_overrides(self._pg_pool)
         self._redis = await create_redis(self.settings)
         ctx = DefaultRuleContext(
             self.settings,
@@ -131,6 +135,7 @@ class AlertsWorker:
             self._pg_pool,
             sensitive_zones=sensitive,
             restricted_zones=restricted,
+            dwell_overrides=dwell_overrides,
         )
         self._engine = AlertEngine(build_rules(self.registry), ctx)
         self._ctx = ctx

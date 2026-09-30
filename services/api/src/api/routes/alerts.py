@@ -10,9 +10,13 @@ from anpr_common.config import Settings
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
-from api.db import AlertRow
-from api.deps import MinioDep, SessionDep, SettingsDep, UserDep
-from api.schemas import AlertActionBody, AlertOut, DispatchBody
+from anpr_common.intelligence.access import role_can
+from anpr_common.intelligence.review import ReviewError, transition_status
+
+from api.auditutil import audit_row
+from api.db import AlertReviewRow, AlertRow
+from api.deps import MinioDep, OperatorUserDep, SessionDep, SettingsDep, UserDep
+from api.schemas import AlertActionBody, AlertOut, DispatchBody, ReviewBody
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -143,5 +147,71 @@ async def close_alert(
     row.status = "closed"
     row.closed_note = body.note.strip()
     row.updated_at = datetime.now(UTC)
+    session.add(
+        audit_row(user, "alert_close", plate_norm=row.plate_norm, params={"alert_id": str(row.id)})
+    )
+    await session.commit()
+    return _alert_out(row)
+
+
+@router.get("/{alert_id}/reviews")
+async def list_reviews(alert_id: UUID, session: SessionDep, _user: UserDep) -> list[dict]:
+    result = await session.execute(
+        select(AlertReviewRow)
+        .where(AlertReviewRow.alert_id == alert_id)
+        .order_by(AlertReviewRow.created_at)
+    )
+    return [
+        {
+            "id": str(row.id),
+            "actor": row.actor,
+            "from_status": row.from_status,
+            "to_status": row.to_status,
+            "note": row.note,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in result.scalars()
+    ]
+
+
+@router.post("/{alert_id}/review", response_model=AlertOut)
+async def review_alert(
+    alert_id: UUID,
+    body: ReviewBody,
+    session: SessionDep,
+    user: OperatorUserDep,
+) -> AlertOut:
+    if not role_can(user.role.value, "review_alert"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to review")
+    row = await session.get(AlertRow, alert_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+    try:
+        target = transition_status(row.status, body.status, body.note)
+    except ReviewError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    previous = row.status
+    row.status = target
+    if body.note and body.note.strip():
+        row.closed_note = body.note.strip()
+    row.ack_by = row.ack_by or user.username
+    row.updated_at = datetime.now(UTC)
+    session.add(
+        AlertReviewRow(
+            alert_id=row.id,
+            actor=user.username,
+            from_status=previous,
+            to_status=target,
+            note=body.note.strip() if body.note else None,
+        )
+    )
+    session.add(
+        audit_row(
+            user,
+            "alert_review",
+            plate_norm=row.plate_norm,
+            params={"alert_id": str(row.id), "from": previous, "to": target},
+        )
+    )
     await session.commit()
     return _alert_out(row)

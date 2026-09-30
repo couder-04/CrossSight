@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
-ALLOWED_CHANNELS = frozenset({"heatmap", "alerts", "flow"})
+ALLOWED_CHANNELS = frozenset({"heatmap", "alerts", "flow", "reads"})
 
 
 @router.websocket("/ws/live")

@@ -630,6 +630,7 @@ class OCRPipeline:
             crop_key=crop_key,
             source="ocr",
             track_id=state.track_id,
+            bbox=list(state.last_bbox) if state.last_bbox else None,
         )
         self.publisher.publish(read)
         return True

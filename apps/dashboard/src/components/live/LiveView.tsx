@@ -16,7 +16,7 @@ import {
   formatTs,
   h3IntToString,
 } from "@/lib/utils";
-import type { Alert, Camera, FlowWindow, HeatmapWsPayload, SegmentCongestion } from "@/types";
+import type { Alert, Camera, FlowWindow, HeatmapWsPayload, LiveRead, SegmentCongestion } from "@/types";
 
 interface HeatCell {
   h3: string;
@@ -32,6 +32,7 @@ export function LiveView() {
   const [routeCorridors, setRouteCorridors] = useState<
     Array<{ camera_a: string; camera_b: string; hop_count: number }>
   >([]);
+  const [reads, setReads] = useState<LiveRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,12 +64,13 @@ export function LiveView() {
 
   useEffect(() => {
     load();
+    api.recentReads().then((res) => setReads((res.reads ?? []) as unknown as LiveRead[])).catch(() => undefined);
   }, [load]);
 
   useEffect(() => {
     const socket = new LiveSocket();
     socket.connect();
-    socket.subscribe(["heatmap", "alerts", "flow"]);
+    socket.subscribe(["heatmap", "alerts", "flow", "reads"]);
 
     const off = socket.onMessage((msg) => {
       if (msg.channel === "heatmap") {
@@ -87,6 +89,10 @@ export function LiveView() {
       if (msg.channel === "flow") {
         const fw = msg.data as FlowWindow;
         setFlowByCamera((prev) => new Map(prev).set(fw.camera_id, fw));
+      }
+      if (msg.channel === "reads") {
+        const read = msg.data as LiveRead;
+        setReads((prev) => [read, ...prev].slice(0, 30));
       }
     });
 
@@ -236,6 +242,25 @@ export function LiveView() {
           <Kpi label="Congested segments" value={String(kpis.congested)} tone="warning" />
         </div>
 
+        <Card className="m-3 mb-0 max-h-48 flex flex-col border-0">
+          <CardHeader title="Live reads" />
+          <div className="overflow-y-auto p-3 space-y-2">
+            {reads.length === 0 && <p className="text-muted text-xs">Waiting for the read stream…</p>}
+            {reads.map((read, index) => (
+              <div key={`${read.camera_id}-${read.ts}-${index}`} className="text-xs border border-border rounded p-2">
+                <div className="flex justify-between font-mono">
+                  <span className="text-accent">{read.plate_norm}</span>
+                  <span>{Math.round((read.confidence ?? 0) * 100)}%</span>
+                </div>
+                <p className="text-muted">
+                  {read.vehicle_class} · {read.camera_id}
+                  {read.track_id != null ? ` · #${read.track_id}` : ""}
+                  {alerts.some((a) => a.plate_norm === read.plate_norm) ? " · alert" : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
         <Card className="flex-1 m-3 min-h-0 flex flex-col border-0">
           <CardHeader title="Live alerts" />
           <div className="flex-1 overflow-y-auto p-3 space-y-2">

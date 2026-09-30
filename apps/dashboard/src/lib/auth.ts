@@ -15,8 +15,14 @@ export function navItemsForRole(role: Role) {
   const items = [
     { href: "/live", label: "Live", roles: ["admin", "operator", "analyst"] as Role[] },
     { href: "/track", label: "Track", roles: ["admin", "operator"] as Role[] },
+    { href: "/flow", label: "Flow", roles: ["admin", "operator", "analyst"] as Role[] },
     { href: "/analytics", label: "Analytics", roles: ["admin", "operator", "analyst"] as Role[] },
     { href: "/alerts", label: "Alerts", roles: ["admin", "operator", "analyst"] as Role[] },
+    { href: "/health", label: "Health", roles: ["admin", "operator", "analyst"] as Role[] },
+    { href: "/review", label: "Review", roles: ["admin", "operator"] as Role[] },
+    { href: "/investigate", label: "Investigate", roles: ["admin", "operator"] as Role[] },
+    { href: "/imports", label: "Import", roles: ["admin", "operator"] as Role[] },
+    { href: "/exports", label: "Export", roles: ["admin", "operator", "analyst"] as Role[] },
     { href: "/admin", label: "Admin", roles: ["admin"] as Role[] },
   ];
   return items.filter((item) => item.roles.includes(role));

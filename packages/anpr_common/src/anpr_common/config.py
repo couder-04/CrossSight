@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     route_anomaly_min_cameras: int = Field(default=3, alias="ROUTE_ANOMALY_MIN_CAMERAS")
     route_anomaly_distance_m: float = Field(default=8000.0, alias="ROUTE_ANOMALY_DISTANCE_M")
 
+    stopped_short_s: float = Field(default=45.0, alias="STOPPED_SHORT_S")
+    stopped_excessive_s: float = Field(default=120.0, alias="STOPPED_EXCESSIVE_S")
+    stopped_incident_s: float = Field(default=180.0, alias="STOPPED_INCIDENT_S")
+    stopped_gap_s: float = Field(default=90.0, alias="STOPPED_GAP_S")
+
+    health_stale_s: float = Field(default=300.0, alias="HEALTH_STALE_S")
+    health_offline_s: float = Field(default=900.0, alias="HEALTH_OFFLINE_S")
+    health_expected_rpm: float = Field(default=1.0, alias="HEALTH_EXPECTED_RPM")
+    health_rate_low_ratio: float = Field(default=0.25, alias="HEALTH_RATE_LOW_RATIO")
+    health_rate_high_ratio: float = Field(default=4.0, alias="HEALTH_RATE_HIGH_RATIO")
+    health_window_s: float = Field(default=300.0, alias="HEALTH_WINDOW_S")
+
+    max_upload_video_bytes: int = Field(default=512 * 1024 * 1024, alias="MAX_UPLOAD_VIDEO_BYTES")
+    max_upload_image_bytes: int = Field(default=15 * 1024 * 1024, alias="MAX_UPLOAD_IMAGE_BYTES")
+    max_upload_table_bytes: int = Field(default=10 * 1024 * 1024, alias="MAX_UPLOAD_TABLE_BYTES")
+    export_url_ttl_s: int = Field(default=900, alias="EXPORT_URL_TTL_S")
+    export_sync_row_limit: int = Field(default=5000, alias="EXPORT_SYNC_ROW_LIMIT")
+
     map_style_url: str = Field(
         default="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         alias="NEXT_PUBLIC_MAP_STYLE_URL",

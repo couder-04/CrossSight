@@ -47,6 +47,8 @@ class AlertType(str, Enum):
     wrong_way = "wrong_way"
     plate_vehicle_mismatch = "plate_vehicle_mismatch"
     route_anomaly = "route_anomaly"
+    stopped_vehicle = "stopped_vehicle"
+    camera_health = "camera_health"
 
 
 class AlertSeverity(str, Enum):
@@ -62,6 +64,9 @@ class AlertStatus(str, Enum):
     dispatched = "dispatched"
     closed = "closed"
     false_positive = "false_positive"
+    reviewing = "reviewing"
+    approved = "approved"
+    dismissed = "dismissed"
 
 
 class PlateRead(BaseModel):
@@ -84,6 +89,8 @@ class PlateRead(BaseModel):
     crop_key: str | None = None
     source: Literal["ocr", "simulator"] = "simulator"
     track_id: int | None = None
+    bbox: list[float] | None = None
+    source_video_key: str | None = None
 
     @field_validator("plate_norm")
     @classmethod

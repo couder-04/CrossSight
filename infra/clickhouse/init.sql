@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS anpr.anpr_reads
     source LowCardinality(String),
     h3_r8 UInt64,
     h3_r7 UInt64,
+    track_id Nullable(Int32),
+    bbox Array(Float32),
     INDEX idx_plate_ngram plate_norm TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 4
 )
 ENGINE = MergeTree
@@ -86,3 +88,45 @@ CREATE TABLE IF NOT EXISTS anpr.heatmap_1min
 )
 ENGINE = SummingMergeTree
 ORDER BY (minute, h3_cell);
+
+CREATE TABLE IF NOT EXISTS anpr.od_camera_hourly
+(
+    origin_camera String,
+    dest_camera String,
+    hour DateTime('UTC'),
+    trip_count UInt32
+)
+ENGINE = SummingMergeTree
+ORDER BY (hour, origin_camera, dest_camera);
+
+CREATE TABLE IF NOT EXISTS anpr.dwell_events
+(
+    plate_norm String,
+    camera_id String,
+    vehicle_class LowCardinality(String),
+    entry_ts DateTime64(3, 'UTC'),
+    exit_ts DateTime64(3, 'UTC'),
+    dwell_s Float32,
+    classification LowCardinality(String),
+    confidence Float32,
+    crop_key Nullable(String)
+)
+ENGINE = MergeTree
+ORDER BY (camera_id, entry_ts);
+
+CREATE TABLE IF NOT EXISTS anpr.travel_stats_5min
+(
+    camera_a String,
+    camera_b String,
+    window_start DateTime('UTC'),
+    sample_count UInt32,
+    avg_travel_s Float32,
+    median_travel_s Float32,
+    min_travel_s Float32,
+    max_travel_s Float32,
+    p90_travel_s Float32,
+    avg_speed_kmh Float32,
+    distance_m Float32
+)
+ENGINE = MergeTree
+ORDER BY (camera_a, camera_b, window_start);

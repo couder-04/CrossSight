@@ -64,6 +64,9 @@ def _read_evidence(read: PlateRead) -> dict[str, Any]:
         "vehicle_class": read.vehicle_class.value,
         "crop_key": read.crop_key,
         "lane": read.lane,
+        "track_id": read.track_id,
+        "bbox": read.bbox,
+        "source_video_key": read.source_video_key,
     }
 
 
@@ -412,6 +415,32 @@ class RouteAnomalyRule(Rule):
         ]
 
 
+class StoppedVehicleRule(Rule):
+    """Stationary dwell at one camera. This does not replace zone loitering."""
+
+    name = "stopped_vehicle"
+
+    async def evaluate(self, read: PlateRead, ctx: RuleContext) -> list[Alert]:
+        observe = getattr(ctx, "observe_dwell", None)
+        if observe is None:
+            return []
+        result = await observe(read)
+        if not result or not result.get("should_alert"):
+            return []
+        evidence = dict(result.get("evidence") or {})
+        evidence["reads"] = [_read_evidence(read)]
+        return [
+            Alert(
+                type=AlertType.stopped_vehicle,
+                severity=AlertSeverity.high,
+                plate_norm=read.plate_norm,
+                camera_ids=[read.camera_id],
+                evidence=evidence,
+                ts=read.ts,
+            )
+        ]
+
+
 class AlertDeduper:
     """Deduplicate alerts per (type, plate) within 10 minutes."""
 
@@ -442,6 +471,7 @@ class DefaultRuleContext:
         *,
         sensitive_zones: dict[str, str] | None = None,
         restricted_zones: dict[str, tuple[str, dict]] | None = None,
+        dwell_overrides: dict[str, dict] | None = None,
     ) -> None:
         self.settings = settings
         self.cameras = cameras
@@ -453,6 +483,7 @@ class DefaultRuleContext:
         }
         self.sensitive_zones: dict[str, str] = dict(sensitive_zones or {})
         self.restricted_zones: dict[str, tuple[str, dict]] = dict(restricted_zones or {})
+        self.dwell_overrides: dict[str, dict] = dict(dwell_overrides or {})
         self._loiter_counts: dict[tuple[str, str], list[datetime]] = defaultdict(list)
 
     def set_zone_cache(
@@ -552,3 +583,112 @@ class DefaultRuleContext:
         # Drop old entries and count
         await self.redis.zremrangebyscore(key, 0, since.timestamp() - 0.001)
         return int(await self.redis.zcount(key, since.timestamp(), "+inf"))
+
+    async def observe_dwell(self, read: PlateRead) -> dict[str, Any]:
+        from anpr_common.intelligence.dwell import (
+            DwellObservation,
+            DwellThresholds,
+            advance_dwell,
+            classify_dwell,
+            thresholds_for_camera,
+        )
+
+        plate = read.plate_norm.upper()
+        key = f"dwell:{plate}"
+        raw = await self.redis.hgetall(key)
+        state = _dwell_from_redis(raw)
+        defaults = DwellThresholds(
+            short_s=float(getattr(self.settings, "stopped_short_s", 45)),
+            excessive_s=float(getattr(self.settings, "stopped_excessive_s", 120)),
+            incident_s=float(getattr(self.settings, "stopped_incident_s", 180)),
+            gap_s=float(getattr(self.settings, "stopped_gap_s", 90)),
+        )
+        thresholds = thresholds_for_camera(read.camera_id, defaults, self.dwell_overrides)
+        cam = self.cameras.get(read.camera_id)
+        obs = DwellObservation(
+            vehicle_id=plate,
+            plate=plate,
+            camera_id=read.camera_id,
+            ts=read.ts,
+            confidence=read.confidence,
+            vehicle_class=read.vehicle_class.value,
+            zone_id=self.sensitive_zones.get(read.camera_id),
+            crop_key=read.crop_key,
+            lat=cam.lat if cam else None,
+            lng=cam.lng if cam else None,
+            track_id=read.track_id,
+        )
+        new_state, _closed, should_alert = advance_dwell(state, obs, thresholds)
+        await self.redis.hset(key, mapping=_dwell_to_redis(new_state))
+        await self.redis.expire(key, int(thresholds.incident_s + thresholds.gap_s + 600))
+        kind = classify_dwell(new_state.dwell_s, thresholds)
+        return {
+            "should_alert": should_alert,
+            "classification": kind.value,
+            "evidence": {
+                "vehicle_id": new_state.vehicle_id,
+                "plate_norm": new_state.plate,
+                "camera_id": new_state.camera_id,
+                "zone_id": new_state.zone_id,
+                "first_seen": new_state.first_seen.isoformat(),
+                "last_seen": new_state.last_seen.isoformat(),
+                "dwell_s": new_state.dwell_s,
+                "classification": kind.value,
+                "confidence": new_state.confidence,
+                "crop_key": new_state.crop_key,
+                "lat": new_state.lat,
+                "lng": new_state.lng,
+                "track_id": new_state.track_id,
+                "sightings": new_state.sightings,
+                "vehicle_class": new_state.vehicle_class,
+            },
+        }
+
+
+def _dwell_from_redis(raw: dict) -> Any:
+    from anpr_common.intelligence.dwell import DwellState
+
+    if not raw or "first_seen" not in raw:
+        return None
+    first = datetime.fromisoformat(raw["first_seen"])
+    last = datetime.fromisoformat(raw["last_seen"])
+    if first.tzinfo is None:
+        first = first.replace(tzinfo=UTC)
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=UTC)
+    track = raw.get("track_id")
+    return DwellState(
+        vehicle_id=raw.get("vehicle_id") or raw.get("plate") or "",
+        plate=raw.get("plate") or "",
+        camera_id=raw["camera_id"],
+        zone_id=raw.get("zone_id") or None,
+        first_seen=first,
+        last_seen=last,
+        sightings=int(raw.get("sightings") or 1),
+        confidence=float(raw.get("confidence") or 0),
+        crop_key=raw.get("crop_key") or None,
+        vehicle_class=raw.get("vehicle_class") or "car",
+        lat=float(raw["lat"]) if raw.get("lat") else None,
+        lng=float(raw["lng"]) if raw.get("lng") else None,
+        track_id=int(track) if track not in (None, "") else None,
+        alerted=raw.get("alerted") == "1",
+    )
+
+
+def _dwell_to_redis(state: Any) -> dict[str, str]:
+    return {
+        "vehicle_id": state.vehicle_id,
+        "plate": state.plate,
+        "camera_id": state.camera_id,
+        "zone_id": state.zone_id or "",
+        "first_seen": state.first_seen.isoformat(),
+        "last_seen": state.last_seen.isoformat(),
+        "sightings": str(state.sightings),
+        "confidence": str(state.confidence),
+        "crop_key": state.crop_key or "",
+        "vehicle_class": state.vehicle_class,
+        "lat": "" if state.lat is None else str(state.lat),
+        "lng": "" if state.lng is None else str(state.lng),
+        "track_id": "" if state.track_id is None else str(state.track_id),
+        "alerted": "1" if state.alerted else "0",
+    }

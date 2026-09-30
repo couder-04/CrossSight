@@ -11,7 +11,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import get_session_factory
-from api.routes import alerts, analytics, audit, auth, cameras, crops, trajectory, watchlist, ws, zones
+from api.migrate import apply_postgres_upgrade
+from api.routes import (
+    alerts,
+    analytics,
+    audit,
+    auth,
+    cameras,
+    crops,
+    platform,
+    trajectory,
+    transfers,
+    watchlist,
+    ws,
+    zones,
+)
 from api.seed import ensure_seed_users
 
 logger = logging.getLogger(__name__)
@@ -22,6 +36,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     factory = get_session_factory(settings)
     async with factory() as session:
+        await apply_postgres_upgrade(session)
         await ensure_seed_users(session, settings)
     logger.info("API started; seed users ensured")
     yield
@@ -50,6 +65,8 @@ def create_app() -> FastAPI:
     app.include_router(trajectory.router)
     app.include_router(analytics.router)
     app.include_router(alerts.router)
+    app.include_router(platform.router)
+    app.include_router(transfers.router)
     app.include_router(crops.router)
     app.include_router(audit.router)
     app.include_router(ws.router)

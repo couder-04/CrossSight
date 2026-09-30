@@ -215,6 +215,98 @@ export const api = {
       { token },
     );
   },
+
+  overview(token?: string) {
+    return request<Record<string, unknown>>("/ops/overview", { token });
+  },
+
+  cameraHealth(token?: string) {
+    return request<{ summary: Record<string, number>; cameras: Array<Record<string, unknown>> }>(
+      "/ops/cameras/health",
+      { token },
+    );
+  },
+
+  scanHealth(token?: string) {
+    return request<{ created: number }>("/ops/cameras/health/scan", { method: "POST", body: "{}", token });
+  },
+
+  cameraOd(token?: string) {
+    return request<{ cells: Array<Record<string, unknown>> }>("/ops/od", { token });
+  },
+
+  travel(token?: string) {
+    return request<{ routes: Array<Record<string, unknown>> }>("/ops/travel", { token });
+  },
+
+  dwell(token?: string) {
+    return request<{ sessions: Array<Record<string, unknown>> }>("/ops/dwell", { token });
+  },
+
+  vehicles(token?: string) {
+    return request<Record<string, unknown>>("/ops/vehicles", { token });
+  },
+
+  recentReads(cameraId?: string, token?: string) {
+    const qs = cameraId ? `?camera_id=${encodeURIComponent(cameraId)}` : "";
+    return request<{ reads: Array<Record<string, unknown>> }>(`/ops/reads${qs}`, { token });
+  },
+
+  investigation(plate: string, token?: string) {
+    return request<Record<string, unknown>>(`/ops/investigation?plate=${encodeURIComponent(plate)}`, { token });
+  },
+
+  reviewAlert(id: string, status: string, note: string, token?: string) {
+    return request<Alert>(`/alerts/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ status, note }),
+      token,
+    });
+  },
+
+  reviews(id: string, token?: string) {
+    return request<Array<Record<string, unknown>>>(`/alerts/${id}/reviews`, { token });
+  },
+
+  imports(token?: string) {
+    return request<Array<Record<string, unknown>>>("/imports", { token });
+  },
+
+  previewImport(kind: string, file: File, token?: string) {
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("file", file);
+    return request<Record<string, unknown>>("/imports/preview", { method: "POST", body: form, token });
+  },
+
+  confirmImport(id: string, acknowledgeInvalid: boolean, overwrite: boolean, token?: string) {
+    const qs = new URLSearchParams({
+      acknowledge_invalid: String(acknowledgeInvalid),
+      overwrite: String(overwrite),
+    });
+    return request<Record<string, unknown>>(`/imports/${id}/confirm?${qs}`, { method: "POST", body: "{}", token });
+  },
+
+  uploadMedia(kind: string, cameraId: string, file: File, capturedAt: string, token?: string) {
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("camera_id", cameraId);
+    form.append("file", file);
+    if (capturedAt) form.append("captured_at", capturedAt);
+    return request<Record<string, unknown>>("/uploads/media", { method: "POST", body: form, token });
+  },
+
+  exports(token?: string) {
+    return request<Array<Record<string, unknown>>>("/exports", { token });
+  },
+
+  createExport(kind: string, format: string, filters: Record<string, string>, token?: string) {
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("fmt", format);
+    form.append("filters", JSON.stringify(filters));
+    return request<Record<string, unknown>>("/exports", { method: "POST", body: form, token });
+  },
 };
 
 export type { UserSession };

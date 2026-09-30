@@ -35,7 +35,7 @@ export function Nav() {
         <span className="text-xs text-muted hidden sm:inline">Control Room</span>
       </Link>
 
-      <nav className="flex items-center gap-1 flex-1">
+      <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
         {items.map((item) => (
           <Link
             key={item.href}

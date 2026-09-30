@@ -44,6 +44,7 @@ class ZoneInfo:
 class ClickHouseClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self.extended = False
         self._client = clickhouse_connect.get_client(
             host=self.settings.clickhouse_host,
             port=self.settings.clickhouse_port,
@@ -77,7 +78,9 @@ class ClickHouseClient:
             "h3_r8",
             "h3_r7",
         ]
-        data = [[row[c] for c in columns] for row in rows]
+        if self.extended:
+            columns.extend(["track_id", "bbox"])
+        data = [[row.get(c) if c in {"track_id", "bbox"} else row[c] for c in columns] for row in rows]
         self._client.insert("anpr_reads", data, column_names=columns)
 
     def insert_flow_5min(self, rows: list[dict[str, Any]]) -> None:
@@ -126,6 +129,68 @@ class ClickHouseClient:
         columns = ["h3_cell", "minute", "count"]
         data = [[row[c] for c in columns] for row in rows]
         self._client.insert("heatmap_1min", data, column_names=columns)
+
+    def ensure_schema(self) -> None:
+        from anpr_common.intelligence.ddl import clickhouse_statements
+
+        for statement in clickhouse_statements():
+            self._client.command(statement)
+        self.extended = True
+
+    def insert_od_camera(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        columns = ["origin_camera", "dest_camera", "hour", "trip_count"]
+        data = [[row[c] for c in columns] for row in rows]
+        self._client.insert("od_camera_hourly", data, column_names=columns)
+
+    def insert_dwell_events(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        columns = [
+            "plate_norm",
+            "camera_id",
+            "vehicle_class",
+            "entry_ts",
+            "exit_ts",
+            "dwell_s",
+            "classification",
+            "confidence",
+            "crop_key",
+        ]
+        data = [[row.get(c) for c in columns] for row in rows]
+        self._client.insert("dwell_events", data, column_names=columns)
+
+    def insert_travel_stats(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        columns = [
+            "camera_a",
+            "camera_b",
+            "window_start",
+            "sample_count",
+            "avg_travel_s",
+            "median_travel_s",
+            "min_travel_s",
+            "max_travel_s",
+            "p90_travel_s",
+            "avg_speed_kmh",
+            "distance_m",
+        ]
+        data = [[row.get(c) for c in columns] for row in rows]
+        self._client.insert("travel_stats_5min", data, column_names=columns)
+
+    async def insert_od_camera_async(self, rows: list[dict[str, Any]]) -> None:
+        await asyncio.to_thread(self.insert_od_camera, rows)
+
+    async def insert_dwell_events_async(self, rows: list[dict[str, Any]]) -> None:
+        await asyncio.to_thread(self.insert_dwell_events, rows)
+
+    async def insert_travel_stats_async(self, rows: list[dict[str, Any]]) -> None:
+        await asyncio.to_thread(self.insert_travel_stats, rows)
+
+    async def ensure_schema_async(self) -> None:
+        await asyncio.to_thread(self.ensure_schema)
 
     def query_free_flow_speeds(self) -> dict[tuple[str, str], float]:
         """85th percentile segment speed during 00:00-05:00 (free-flow baseline)."""
@@ -188,6 +253,22 @@ async def create_pg_pool(settings: Settings | None = None) -> asyncpg.Pool:
         min_size=1,
         max_size=5,
     )
+
+
+async def load_dwell_overrides(pool: asyncpg.Pool) -> dict[str, dict]:
+    try:
+        rows = await pool.fetch("SELECT id, ops_config FROM cameras")
+    except Exception:
+        return {}
+    overrides: dict[str, dict] = {}
+    for row in rows:
+        cfg = row["ops_config"] or {}
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        dwell = cfg.get("dwell") if isinstance(cfg, dict) else None
+        if isinstance(dwell, dict):
+            overrides[row["id"]] = dwell
+    return overrides
 
 
 async def load_cameras(pool: asyncpg.Pool) -> dict[str, CameraInfo]:

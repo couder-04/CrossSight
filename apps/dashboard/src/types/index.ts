@@ -121,7 +121,19 @@ export interface GeoJSONFeatureCollection {
   summary?: TrajectorySummary;
 }
 
-export type WsChannel = "heatmap" | "alerts" | "flow";
+export type WsChannel = "heatmap" | "alerts" | "flow" | "reads";
+
+export interface LiveRead {
+  camera_id: string;
+  ts: string;
+  plate_norm: string;
+  confidence: number;
+  vehicle_class: string;
+  track_id?: number | null;
+  bbox?: number[];
+  lane?: number | null;
+  direction?: string | null;
+}
 
 export interface WsMessage {
   channel: WsChannel;

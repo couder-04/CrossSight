@@ -56,6 +56,7 @@ class PlateState:
     last_h3_r7: int | None = None
     trip_start_h3: int | None = None
     trip_start_ts: datetime | None = None
+    trip_start_camera: str | None = None
     sightings: list[tuple[datetime, str, int]] = field(default_factory=list)
 
 
@@ -88,6 +89,10 @@ class AnalyticsEngine:
         self.bottlenecks: list[dict[str, Any]] = []
         self.anomalies: list[dict[str, Any]] = []
         self.od_buffer: list[dict[str, Any]] = []
+        self.od_camera_buffer: list[dict[str, Any]] = []
+        self.dwell_states: dict[str, Any] = {}
+        self.dwell_events: list[dict[str, Any]] = []
+        self.travel_rows: list[dict[str, Any]] = []
         self.watermark: datetime | None = None
 
     def set_topology(
@@ -117,6 +122,7 @@ class AnalyticsEngine:
 
         self._update_od(read, h3_r7)
         self._update_segment_speed(read)
+        self._update_dwell(read)
         self._check_volume_anomaly(read.camera_id, read.ts, win.volume)
 
         return self._maybe_emit_flow(read.camera_id, read.lane, ws)
@@ -154,6 +160,20 @@ class AnalyticsEngine:
                     "trip_count": 1,
                 }
             )
+        if (
+            state.trip_start_camera
+            and state.last_camera
+            and state.trip_start_camera != state.last_camera
+        ):
+            hour = datetime(hour_ts.year, hour_ts.month, hour_ts.day, hour_ts.hour, tzinfo=UTC)
+            self.od_camera_buffer.append(
+                {
+                    "origin_camera": state.trip_start_camera,
+                    "dest_camera": state.last_camera,
+                    "hour": hour.replace(tzinfo=None),
+                    "trip_count": 1,
+                }
+            )
 
     def _update_od(self, read: PlateRead, h3_r7: int) -> None:
         gap = timedelta(minutes=self.settings.trip_gap_min)
@@ -162,9 +182,11 @@ class AnalyticsEngine:
             self._close_trip(state, state.last_ts)
             state.trip_start_h3 = h3_r7
             state.trip_start_ts = read.ts
+            state.trip_start_camera = read.camera_id
         elif state.trip_start_h3 is None:
             state.trip_start_h3 = h3_r7
             state.trip_start_ts = read.ts
+            state.trip_start_camera = read.camera_id
         state.last_h3_r7 = h3_r7
 
     def _check_volume_anomaly(self, camera_id: str, ts: datetime, volume: int) -> None:
@@ -265,6 +287,7 @@ class AnalyticsEngine:
                 self._close_trip(state, last)
                 state.trip_start_h3 = None
                 state.trip_start_ts = None
+                state.trip_start_camera = None
 
     def aggregate_segments(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -276,6 +299,23 @@ class AnalyticsEngine:
             med_tt = statistics.median(travel_times)
             med_spd = statistics.median(speeds)
             self.pair_medians[(a, b)] = med_tt
+            ordered = sorted(travel_times)
+            p90_index = min(len(ordered) - 1, round(0.9 * (len(ordered) - 1)))
+            self.travel_rows.append(
+                {
+                    "camera_a": a,
+                    "camera_b": b,
+                    "window_start": ws,
+                    "sample_count": len(samples),
+                    "avg_travel_s": float(statistics.fmean(travel_times)),
+                    "median_travel_s": float(med_tt),
+                    "min_travel_s": float(min(travel_times)),
+                    "max_travel_s": float(max(travel_times)),
+                    "p90_travel_s": float(ordered[p90_index]),
+                    "avg_speed_kmh": float(statistics.fmean(speeds)),
+                    "distance_m": float(self.adjacent_pairs.get((a, b), 0.0)),
+                }
+            )
             rows.append(
                 {
                     "camera_a": a,
@@ -328,6 +368,59 @@ class AnalyticsEngine:
         self.od_buffer = []
         return rows
 
+    def drain_od_camera(self) -> list[dict[str, Any]]:
+        rows = self.od_camera_buffer
+        self.od_camera_buffer = []
+        return rows
+
+    def drain_dwell(self) -> list[dict[str, Any]]:
+        rows = self.dwell_events
+        self.dwell_events = []
+        return rows
+
+    def drain_travel(self) -> list[dict[str, Any]]:
+        rows = self.travel_rows
+        self.travel_rows = []
+        return rows
+
+    def _update_dwell(self, read: PlateRead) -> None:
+        from anpr_common.intelligence.dwell import DwellObservation, DwellThresholds, advance_dwell
+
+        thresholds = DwellThresholds(
+            short_s=float(getattr(self.settings, "stopped_short_s", 45)),
+            excessive_s=float(getattr(self.settings, "stopped_excessive_s", 120)),
+            incident_s=float(getattr(self.settings, "stopped_incident_s", 180)),
+            gap_s=float(getattr(self.settings, "stopped_gap_s", 90)),
+        )
+        ts = read.ts if read.ts.tzinfo else read.ts.replace(tzinfo=UTC)
+        obs = DwellObservation(
+            vehicle_id=read.plate_norm,
+            plate=read.plate_norm,
+            camera_id=read.camera_id,
+            ts=ts,
+            confidence=read.confidence,
+            vehicle_class=read.vehicle_class.value,
+            crop_key=read.crop_key,
+            track_id=read.track_id,
+        )
+        state, closed, _alert = advance_dwell(self.dwell_states.get(read.plate_norm), obs, thresholds)
+        self.dwell_states[read.plate_norm] = state
+        if closed is None:
+            return
+        self.dwell_events.append(
+            {
+                "plate_norm": closed["plate"],
+                "camera_id": closed["camera_id"],
+                "vehicle_class": closed["vehicle_class"],
+                "entry_ts": closed["first_seen"].replace(tzinfo=None),
+                "exit_ts": closed["last_seen"].replace(tzinfo=None),
+                "dwell_s": float(closed["dwell_s"]),
+                "classification": closed["classification"],
+                "confidence": float(closed["confidence"]),
+                "crop_key": closed["crop_key"],
+            }
+        )
+
 
 class AnalyticsWorker:
     def __init__(self, settings: Settings | None = None, health_port: int = 8082) -> None:
@@ -348,6 +441,7 @@ class AnalyticsWorker:
         self._cameras = await load_cameras(self._pg_pool)
         pairs = await load_camera_pairs(self._pg_pool)
         self._ch = ClickHouseClient(self.settings)
+        await self._ch.ensure_schema_async()
         free_flow = self._ch.query_free_flow_speeds()
         baselines = self._ch.query_camera_volume_baselines()
         self._engine = AnalyticsEngine(self.settings)
@@ -398,6 +492,15 @@ class AnalyticsWorker:
         od_rows = self._engine.drain_od()
         if od_rows:
             await self._ch.insert_od_hourly_async(od_rows)
+        camera_od = self._engine.drain_od_camera()
+        if camera_od:
+            await self._ch.insert_od_camera_async(camera_od)
+        dwell_rows = self._engine.drain_dwell()
+        if dwell_rows:
+            await self._ch.insert_dwell_events_async(dwell_rows)
+        travel_rows = self._engine.drain_travel()
+        if travel_rows:
+            await self._ch.insert_travel_stats_async(travel_rows)
         if flow_map:
             found = self._engine.detect_bottlenecks(flow_map, how=how)
             if found and self._redis is not None:

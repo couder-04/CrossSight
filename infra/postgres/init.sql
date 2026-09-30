@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     allowed_direction TEXT,
     osm_u BIGINT,
     osm_v BIGINT,
-    status TEXT NOT NULL DEFAULT 'active'
+    status TEXT NOT NULL DEFAULT 'active',
+    ops_config JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_cameras_geom ON cameras USING GIST (geom);
 
@@ -30,6 +31,8 @@ CREATE TABLE IF NOT EXISTS watchlist (
     severity TEXT NOT NULL DEFAULT 'high',
     added_by TEXT NOT NULL,
     expires_at TIMESTAMPTZ,
+    notes TEXT,
+    priority TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -41,7 +44,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     camera_ids TEXT[] NOT NULL DEFAULT '{}',
     evidence JSONB NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'new'
-        CHECK (status IN ('new', 'acknowledged', 'dispatched', 'closed', 'false_positive')),
+        CHECK (status IN (
+            'new', 'acknowledged', 'dispatched', 'closed', 'false_positive',
+            'reviewing', 'approved', 'dismissed'
+        )),
     needs_verification BOOLEAN NOT NULL DEFAULT FALSE,
     ack_by TEXT,
     dispatched_to TEXT,
@@ -79,3 +85,74 @@ CREATE TABLE IF NOT EXISTS camera_pairs (
     PRIMARY KEY (camera_a, camera_b)
 );
 CREATE INDEX IF NOT EXISTS idx_camera_pairs_adj ON camera_pairs (adjacent) WHERE adjacent;
+
+CREATE TABLE IF NOT EXISTS alert_reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_id UUID NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    actor TEXT NOT NULL,
+    from_status TEXT NOT NULL,
+    to_status TEXT NOT NULL,
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_alert_reviews_alert ON alert_reviews (alert_id, created_at);
+
+CREATE TABLE IF NOT EXISTS vehicle_registry (
+    plate_norm TEXT PRIMARY KEY,
+    vehicle_class TEXT,
+    make TEXT,
+    model TEXT,
+    color TEXT,
+    registration_status TEXT NOT NULL DEFAULT 'active',
+    owner_ref TEXT,
+    source TEXT,
+    valid_from TIMESTAMPTZ,
+    valid_until TIMESTAMPTZ,
+    updated_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS camera_calibrations (
+    camera_id TEXT PRIMARY KEY REFERENCES cameras(id) ON DELETE CASCADE,
+    homography JSONB,
+    coordinate_reference TEXT,
+    lanes JSONB,
+    speed_calibration JSONB,
+    updated_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS uploads (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    object_key TEXT,
+    mime TEXT,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    camera_id TEXT,
+    zone_id TEXT,
+    captured_at TIMESTAMPTZ,
+    preview JSONB NOT NULL DEFAULT '{}'::jsonb,
+    result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_created ON uploads (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS exports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind TEXT NOT NULL,
+    format TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+    object_key TEXT,
+    filename TEXT,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_exports_created ON exports (created_at DESC);
