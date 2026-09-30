@@ -13,26 +13,49 @@ import { Select } from "@/components/ui/Select";
 import { api } from "@/lib/api";
 import { titleCase } from "@/lib/utils";
 
+function exportHref(id: string) {
+  return `/api/backend/exports/${encodeURIComponent(id)}/download`;
+}
+
 async function downloadExport(id: string, filename: string) {
-  const res = await fetch(`/api/backend/exports/${id}/download`);
+  const res = await fetch(exportHref(id));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Download failed");
+    const detail = body.detail ?? body.error;
+    const message = typeof detail === "string" ? detail : detail?.message;
+    throw new Error(message ?? "Download failed");
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export function ExportButtons({ kind, filters = {} }: { kind: string; filters?: Record<string, string> }) {
+export function ExportButtons({
+  kind,
+  filters = {},
+  onDone,
+}: {
+  kind: string;
+  filters?: Record<string, string>;
+  onDone?: () => void;
+}) {
   const [message, setMessage] = useState<string | null>(null);
+  const [save, setSave] = useState<{ id: string; filename: string } | null>(null);
 
   async function run(format: "csv" | "pdf" | "json") {
+    if (kind === "investigation" && !filters.plate?.trim()) {
+      setMessage("Enter a plate first");
+      setSave(null);
+      return;
+    }
     setMessage("Queued");
+    setSave(null);
     try {
       const job = await api.createExport(kind, format, filters);
       const id = String(job.id);
@@ -40,8 +63,11 @@ export function ExportButtons({ kind, filters = {} }: { kind: string; filters?: 
         const current = await api.exports();
         const row = current.find((item) => item.id === id);
         if (row?.status === "ready") {
-          await downloadExport(id, String(row.filename ?? `${kind}.${format}`));
-          setMessage("Downloaded");
+          const filename = String(row.filename ?? `${kind}.${format}`);
+          setSave({ id, filename });
+          setMessage("Ready");
+          onDone?.();
+          await downloadExport(id, filename);
           return;
         }
         if (row?.status === "failed") {
@@ -50,8 +76,10 @@ export function ExportButtons({ kind, filters = {} }: { kind: string; filters?: 
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       setMessage("Still processing — check Export");
+      onDone?.();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Export failed");
+      onDone?.();
     }
   }
 
@@ -60,7 +88,12 @@ export function ExportButtons({ kind, filters = {} }: { kind: string; filters?: 
       <Button size="sm" variant="secondary" onClick={() => run("csv")}>Export CSV</Button>
       <Button size="sm" variant="secondary" onClick={() => run("pdf")}>Download PDF</Button>
       <Button size="sm" variant="ghost" onClick={() => run("json")}>JSON</Button>
-      {message && <span className="text-xs text-muted">{message}</span>}
+      {save && (
+        <Button size="sm" href={exportHref(save.id)} download={save.filename}>
+          Save {save.filename}
+        </Button>
+      )}
+      {message && <span className="text-xs text-muted max-w-md">{message}</span>}
     </div>
   );
 }
@@ -293,6 +326,22 @@ const IMPORTS = [
   ["zones", "Zones GeoJSON"],
 ] as const;
 
+const EXPORTS = [
+  ["camera_health", "Camera health"],
+  ["od", "Origin / destination"],
+  ["flow", "Flow"],
+  ["travel", "Travel time"],
+  ["dwell", "Dwell"],
+  ["vehicles", "Vehicle classes"],
+  ["traffic", "Traffic"],
+  ["incidents", "Incidents"],
+  ["enforcement", "Enforcement"],
+  ["sightings", "Sightings"],
+  ["investigation", "Investigation"],
+  ["watchlist", "Watchlist"],
+  ["registry", "Vehicle registry"],
+] as const;
+
 export function ImportPanel() {
   const [kind, setKind] = useState("watchlist");
   const [mediaKind, setMediaKind] = useState("video");
@@ -397,6 +446,26 @@ export function ImportPanel() {
       <Card>
         <CardHeader title="Import history" />
         <Table columns={["id", "filename", "kind", "uploaded_by", "created_at", "status", "valid_count", "invalid_count", "error"]} rows={history} />
+        <div className="p-3 flex flex-wrap gap-2">
+          {history.filter((row) => row.status === "failed" && (row.kind === "video" || row.kind === "image")).map((row) => (
+            <Button
+              key={String(row.id)}
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await api.retryUpload(String(row.id));
+                  setMessage(`Requeued ${String(row.filename)}`);
+                  await load();
+                } catch (err) {
+                  setMessage(err instanceof Error ? err.message : "Retry failed");
+                }
+              }}
+            >
+              Retry {String(row.filename)}
+            </Button>
+          ))}
+        </div>
       </Card>
     </div>
   );
@@ -405,14 +474,19 @@ export function ImportPanel() {
 export function ExportPanel() {
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState<string | null>(null);
+  const [kind, setKind] = useState("camera_health");
+  const [plate, setPlate] = useState("");
   const load = useCallback(async () => {
     try {
       setRows(await api.exports());
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load exports");
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+  const filters: Record<string, string> =
+    kind === "investigation" && plate.trim() ? { plate: plate.trim() } : {};
   return (
     <div className="h-full overflow-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -420,6 +494,18 @@ export function ExportPanel() {
         <Button size="sm" variant="secondary" onClick={load}>Refresh</Button>
       </div>
       {error && <p className="text-danger text-sm">{error}</p>}
+      <Card>
+        <CardHeader title="New report" />
+        <div className="p-4 flex flex-wrap items-end gap-3">
+          <Select label="Report" value={kind} onChange={(event) => setKind(event.target.value)}>
+            {EXPORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </Select>
+          {kind === "investigation" && (
+            <Input label="Plate" value={plate} onChange={(event) => setPlate(event.target.value)} />
+          )}
+          <ExportButtons kind={kind} filters={filters} onDone={load} />
+        </div>
+      </Card>
       <Card>
         <CardHeader title="Jobs" />
         <div className="divide-y divide-border">
@@ -430,10 +516,32 @@ export function ExportPanel() {
               <span>{String(row.status)}</span>
               <span className="text-muted">{String(row.requested_by)} · {String(row.requested_at ?? "")}</span>
               {row.status === "ready" && (
-                <Button size="sm" onClick={() => downloadExport(String(row.id), String(row.filename ?? "export"))}>Download</Button>
+                <Button
+                  size="sm"
+                  href={exportHref(String(row.id))}
+                  download={String(row.filename ?? "export")}
+                >
+                  Download
+                </Button>
+              )}
+              {row.status === "failed" && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      await api.retryExport(String(row.id));
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Retry failed");
+                    }
+                  }}
+                >
+                  Retry
+                </Button>
               )}
               {row.error != null && row.error !== "" && (
-                <span className="text-danger text-xs">{String(row.error)}</span>
+                <span className="text-danger text-xs max-w-xl">{String(row.error)}</span>
               )}
             </div>
           ))}

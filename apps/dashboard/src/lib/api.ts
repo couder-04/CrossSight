@@ -29,6 +29,24 @@ function isServer() {
   return typeof window === "undefined";
 }
 
+function errorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+  const record = body as { detail?: unknown; error?: unknown };
+  const value = record.detail ?? record.error;
+  if (typeof value === "string" && value) return value;
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => {
+      if (item && typeof item === "object" && "msg" in item) return String(item.msg);
+      return String(item);
+    });
+    return parts.filter(Boolean).join("; ") || fallback;
+  }
+  if (value && typeof value === "object" && "message" in value) {
+    return String((value as { message: unknown }).message);
+  }
+  return fallback;
+}
+
 function apiBase(): string {
   if (isServer()) {
     return process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -53,12 +71,11 @@ async function request<T>(
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const body = await res.json();
-      detail = body.detail ?? body.error ?? detail;
+      detail = errorMessage(await res.json(), detail);
     } catch {
       // ignore
     }
-    throw new ApiError(res.status, String(detail));
+    throw new ApiError(res.status, detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -317,6 +334,14 @@ export const api = {
     form.append("fmt", format);
     form.append("filters", JSON.stringify(filters));
     return request<Record<string, unknown>>("/exports", { method: "POST", body: form, token });
+  },
+
+  retryExport(id: string, token?: string) {
+    return request<Record<string, unknown>>(`/exports/${id}/retry`, { method: "POST", body: "{}", token });
+  },
+
+  retryUpload(id: string, token?: string) {
+    return request<Record<string, unknown>>(`/uploads/${id}/retry`, { method: "POST", body: "{}", token });
   },
 };
 

@@ -2,8 +2,11 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE } from "@/lib/auth";
 
-const API_BASE =
-  process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+function apiBase(): string {
+  return process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+}
+
+const SLOW_PREFIXES = new Set(["exports", "imports", "uploads"]);
 
 async function proxy(request: NextRequest, segments: string[]) {
   const jar = await cookies();
@@ -14,7 +17,7 @@ async function proxy(request: NextRequest, segments: string[]) {
 
   const path = `/${segments.join("/")}`;
   const url = new URL(request.url);
-  const target = `${API_BASE}${path}${url.search}`;
+  const target = `${apiBase()}${path}${url.search}`;
 
   const headers = new Headers();
   const contentType = request.headers.get("content-type");
@@ -28,17 +31,29 @@ async function proxy(request: NextRequest, segments: string[]) {
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.arrayBuffer();
+    const payload = await request.arrayBuffer();
+    init.body = payload;
+    headers.set("Content-Length", String(payload.byteLength));
   }
 
-  const res = await fetch(target, init);
+  const timeoutMs = SLOW_PREFIXES.has(segments[0] ?? "") ? 120_000 : 12_000;
+  let res: Response;
+  try {
+    res = await fetch(target, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch {
+    return NextResponse.json({ error: "Control room API is unreachable" }, { status: 502 });
+  }
   const body = await res.arrayBuffer();
+  const outHeaders = new Headers();
+  outHeaders.set("Content-Type", res.headers.get("Content-Type") ?? "application/json");
+  outHeaders.set("Content-Length", String(body.byteLength));
+  outHeaders.set("Cache-Control", "no-store");
+  const disposition = res.headers.get("Content-Disposition");
+  if (disposition) outHeaders.set("Content-Disposition", disposition);
 
   return new NextResponse(body, {
     status: res.status,
-    headers: {
-      "Content-Type": res.headers.get("Content-Type") ?? "application/json",
-    },
+    headers: outHeaders,
   });
 }
 

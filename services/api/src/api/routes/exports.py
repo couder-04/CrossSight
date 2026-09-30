@@ -10,7 +10,7 @@ from uuid import UUID
 from anpr_common.intelligence.access import export_action
 from anpr_common.intelligence.exporters import export_filename
 from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from api._transfer_helpers import (
@@ -18,6 +18,7 @@ from api._transfer_helpers import (
     _export_out,
     _forbid,
     _run_export,
+    read_stored,
 )
 from api.auditutil import audit_row
 from api.db import ExportRow
@@ -130,16 +131,17 @@ async def download_export(
         raise HTTPException(status_code=409, detail="Export is not ready")
     session.add(audit_row(user, "export_download", params={"id": str(row.id), "kind": row.kind}))
     await session.commit()
-    obj = minio.get_object(settings.minio_bucket, row.object_key)
+    payload = read_stored(minio, settings, row.object_key)
     media = (
-        "text/csv"
+        "text/csv; charset=utf-8"
         if row.format == "csv"
         else "application/pdf"
         if row.format == "pdf"
         else "application/json"
     )
-    return StreamingResponse(
-        obj.stream(32 * 1024),
+    filename = (row.filename or "export.bin").replace('"', "")
+    return Response(
+        content=payload,
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="{row.filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

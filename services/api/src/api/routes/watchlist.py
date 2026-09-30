@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from anpr_common.grammar import normalize_plate
@@ -94,8 +94,14 @@ async def import_watchlist_csv(
         if await session.get(WatchlistEntry, plate) is not None:
             skipped += 1
             continue
-        expires_raw = row.get("expires_at")
-        expires_at = datetime.fromisoformat(expires_raw) if expires_raw else None
+        expires_raw = (row.get("expires_at") or "").strip()
+        try:
+            expires_at = datetime.fromisoformat(expires_raw) if expires_raw else None
+        except ValueError:
+            skipped += 1
+            continue
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
         session.add(
             WatchlistEntry(
                 plate_norm=plate,

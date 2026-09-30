@@ -79,12 +79,13 @@ export function LiveView() {
   const load = useCallback(async () => {
     setBooting(true);
     const at = new Date().toISOString();
-    const settled = await Promise.allSettled([
-      api.cameras(),
-      api.segments(at),
-      api.heatmap("15m"),
-      api.alerts(),
-    ]);
+    const pull = () =>
+      Promise.allSettled([api.cameras(), api.segments(at), api.heatmap("15m"), api.alerts()]);
+    let settled = await pull();
+    if (settled.every((result) => result.status === "rejected")) {
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+      settled = await pull();
+    }
     const labels = ["cameras", "congestion segments", "heatmap", "alerts"] as const;
     let failures = 0;
     settled.forEach((result, index) => {

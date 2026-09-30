@@ -310,7 +310,20 @@ async def _upsert_camera(session, item: dict) -> None:
 def _dt(value: str | None):
     if not value:
         return None
-    return datetime.fromisoformat(value)
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def read_stored(minio, settings, key: str) -> bytes:
+    """Read an object and return the MinIO connection to the pool."""
+    obj = minio.get_object(settings.minio_bucket, key)
+    try:
+        return obj.read()
+    finally:
+        obj.close()
+        obj.release_conn()
 
 
 async def _process_media(upload_id: UUID) -> None:
@@ -535,6 +548,33 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
         ]
         records = [[getattr(r, h) for h in headers] for r in rows]
         data = {}
+    elif kind == "sightings":
+        from api.routes.platform import _naive, _query, _window
+
+        begin, finish = _window(start, end)
+        params: dict[str, Any] = {
+            "start": _naive(begin),
+            "end": _naive(finish),
+            "limit": row_limit,
+        }
+        where = "ts >= {start:DateTime} AND ts < {end:DateTime}"
+        if filters.get("camera_id"):
+            where += " AND camera_id = {camera:String}"
+            params["camera"] = filters["camera_id"]
+        rows = _query(
+            ch,
+            f"""
+            SELECT camera_id, ts, plate_norm, confidence, vehicle_class
+            FROM anpr_reads
+            WHERE {where}
+            ORDER BY ts DESC
+            LIMIT {{limit:UInt32}}
+            """,
+            params,
+        )
+        headers = ["camera_id", "ts", "plate_norm", "confidence", "vehicle_class"]
+        records = [[row[0], str(row[1]), row[2], float(row[3] or 0), row[4]] for row in rows]
+        data = {"rows": len(records)}
     else:
         plate = str(filters.get("plate") or "")
         if not plate:

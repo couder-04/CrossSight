@@ -43,16 +43,20 @@ export function TopStatusBar({
         live = false;
       }
       let rows: { status: string }[] = [];
+      let reachable = true;
       try {
         rows = await api.cameras();
       } catch {
-        rows = [];
+        reachable = false;
       }
       if (cancelled) return;
+      if (!live || !reachable) {
+        setSystem("down");
+        return;
+      }
       const healthy = rows.filter((camera) => camera.status === "active" || camera.status === "healthy").length;
       setCameras({ healthy, total: rows.length });
-      if (!live) setSystem("down");
-      else if (rows.length === 0 || healthy < rows.length) setSystem("degraded");
+      if (rows.length === 0 || healthy < rows.length) setSystem("degraded");
       else setSystem("healthy");
     }
     probe();
