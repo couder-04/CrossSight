@@ -17,3 +17,4 @@
 - refactor: split analytics routes into heatmap, flow, and origin-destination modules.
 - chore: run ruff, mypy, pytest, and the dashboard build in CI.
 - chore: clear the first ruff and mypy failures so CI can pass.
+- chore: keep heavy demo video and city-load run logs out of git.
