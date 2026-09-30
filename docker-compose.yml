@@ -277,6 +277,9 @@ services:
       NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws/live
       NEXT_PUBLIC_MAP_STYLE_URL: https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json
       API_INTERNAL_URL: http://api:8000
+      # The dashboard middleware verifies the session cookie with the API's secret. Without it
+      # every page redirects back to /login after a successful login. Same default as the API.
+      JWT_SECRET: ${JWT_SECRET:-change-me-demo-jwt-secret-anpr-platform}
     ports:
       - "3000:3000"
     depends_on:
