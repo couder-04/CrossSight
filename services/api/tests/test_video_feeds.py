@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 
-from api.video_feeds import camera_in_source, camera_records, discover_videos, display_name, write_fleet
+from api.video_feeds import (
+    camera_in_source,
+    camera_records,
+    discover_videos,
+    display_name,
+    write_fleet,
+)
 
 
 def test_discover_sorts_videos_and_skips_other_files(tmp_path):
@@ -35,7 +41,9 @@ def test_camera_records_are_stable_and_separate_from_the_sim(tmp_path):
     fleet = write_fleet(records, tmp_path / "fleet.json")
     payload = json.loads(fleet.read_text(encoding="utf-8"))
     assert payload["cameras"][0]["id"] == "vid-01"
-    assert str(payload["cameras"][0]["source"]).endswith("001_Indian Number Plate Recognition_720P.mp4")
+    assert str(payload["cameras"][0]["source"]).endswith(
+        "001_Indian Number Plate Recognition_720P.mp4"
+    )
 
 
 def test_display_name_plain_playback():

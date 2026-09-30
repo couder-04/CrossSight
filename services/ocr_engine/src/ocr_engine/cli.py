@@ -158,7 +158,9 @@ def fleet_cmd(
 
 
 @main.command("video-city")
-@click.option("--config", required=True, type=click.Path(exists=True), help="Fleet JSON of video files")
+@click.option(
+    "--config", required=True, type=click.Path(exists=True), help="Fleet JSON of video files"
+)
 @click.option("--workers", type=int, default=None, help="OCR workers rotating across the videos")
 @click.option("--stride", type=int, default=None, help="Run OCR on every Nth frame")
 def video_city_cmd(config: str, workers: int | None, stride: int | None) -> None:

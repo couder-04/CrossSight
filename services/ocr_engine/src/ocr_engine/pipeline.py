@@ -393,23 +393,31 @@ class OCRPipeline:
         reconnect: bool | None = None,
         reconnect_delay: float = 2.0,
         annotate_out: str | None = None,
-        ocr_every: int = 1,
+        ocr_every: int | None = None,
         release: bool = True,
+        stride: int | None = None,
+        source_start: datetime | None = None,
     ) -> int:
         """Process a video file or RTSP stream.
 
         RTSP sources reconnect by default; file sources do not.
         If ``annotate_out`` is set, write an MP4 with boxes, track IDs, and OCR text.
-        ``ocr_every`` runs detection on every Nth frame (live preview still updates).
+        ``ocr_every`` (alias ``stride``, CLI ``--stride``) runs detection on every Nth frame
+        (live preview still updates); default ``OCR_FRAME_STRIDE``.
         ``release=False`` keeps the Kafka publisher open so the same pipeline can
         read the next file without reloading models.
+        Event timestamps are capture times: wall clock for live streams, and
+        ``source_start`` (default: now) + the frame's position for files.
         """
-        stride = max(1, int(stride or getattr(self.settings, "ocr_frame_stride", 1) or 1))
+        every = max(
+            1, int(ocr_every or stride or getattr(self.settings, "ocr_frame_stride", 1) or 1)
+        )
         file_start = source_start or datetime.now(UTC)
         self.publisher.connect()
         self.byte_tracker.reset()
         self.tracks.clear()
         self._active_ids.clear()
+        self._alive_ids = set()
         self._next_track_id = 1
         is_stream = str(source).lower().startswith(("rtsp://", "http://", "https://"))
         do_reconnect = is_stream if reconnect is None else reconnect
@@ -447,7 +455,12 @@ class OCRPipeline:
                         emptied = False
                         do_reconnect = False
                         break
-                    if ocr_every <= 1 or frame_idx % ocr_every == 0:
+                    if every <= 1 or frame_idx % every == 0:
+                        if is_stream:
+                            self._frame_ts = datetime.now(UTC)
+                        else:
+                            pos_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                            self._frame_ts = file_start + timedelta(milliseconds=pos_ms)
                         if self.backend == "plateocr":
                             self._process_frame_plateocr(frame)
                         else:

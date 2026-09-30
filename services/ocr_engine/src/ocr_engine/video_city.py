@@ -23,7 +23,9 @@ from ocr_engine.pipeline import MinioUploader, OCRPipeline, encode_preview_jpeg
 logger = logging.getLogger(__name__)
 
 
-def _publish_frame(uploader: MinioUploader, redis_client: list, settings, camera_id: str, frame) -> None:
+def _publish_frame(
+    uploader: MinioUploader, redis_client: list, settings, camera_id: str, frame
+) -> None:
     jpeg, _scale = encode_preview_jpeg(frame)
     key = f"frames/latest/{camera_id}.jpg"
     uploader.upload_jpeg(key, jpeg, cache_control="no-store")
@@ -133,7 +135,9 @@ def run_video_city(
     cameras = load_camera_fleet(config_path)
     if not cameras:
         raise RuntimeError(f"No cameras in {config_path}")
-    worker_count = workers if workers is not None else int(os.environ.get("VIDEO_FEED_WORKERS", "2"))
+    worker_count = (
+        workers if workers is not None else int(os.environ.get("VIDEO_FEED_WORKERS", "2"))
+    )
     frame_stride = stride if stride is not None else int(os.environ.get("VIDEO_FEED_STRIDE", "3"))
     worker_count = max(1, min(worker_count, len(cameras)))
     frame_stride = max(1, frame_stride)

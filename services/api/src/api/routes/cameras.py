@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.engine import CursorResult
 
 from api.db import Camera
-from api.deps import AdminUserDep, MinioDep, SessionDep, SettingsDep, UserDep
+from api.deps import AdminUserDep, MinioDep, MinioPresignDep, SessionDep, SettingsDep, UserDep
 from api.schemas import CameraCreate, CameraOut, CameraUpdate
 from api.video_feeds import camera_in_source, normalize_source
 
@@ -77,13 +77,14 @@ async def camera_frame(
     camera_id: str,
     _user: UserDep,
     minio: MinioDep,
+    presign: MinioPresignDep,
     settings: SettingsDep,
 ) -> dict[str, str]:
     """Short-TTL presigned URL for the latest annotated JPEG. Bytes stay in MinIO."""
     key = frame_object_key(camera_id)
     if not frame_exists(minio, settings, camera_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Live frame not found")
-    url = minio.presigned_get_object(
+    url = presign.presigned_get_object(
         settings.minio_bucket,
         key,
         expires=timedelta(minutes=5),

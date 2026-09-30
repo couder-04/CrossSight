@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from api.deps import MinioDep, SettingsDep, UserDep
+from api.deps import MinioPresignDep, SettingsDep, UserDep
 
 router = APIRouter(prefix="/crops", tags=["crops"])
 
@@ -21,7 +21,7 @@ def _safe_key(key: str) -> str:
 @router.get("")
 async def crop_url(
     settings: SettingsDep,
-    minio: MinioDep,
+    minio: MinioPresignDep,
     _user: UserDep,
     key: str = Query(..., description="MinIO object key for a plate crop"),
 ) -> dict[str, str]:

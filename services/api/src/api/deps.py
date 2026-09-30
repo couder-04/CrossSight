@@ -49,6 +49,9 @@ async def get_redis(settings: Settings = Depends(get_settings_dep)) -> aioredis.
     return _redis_client
 
 
+_minio_presign_client: Minio | None = None
+
+
 def get_minio(settings: Settings = Depends(get_settings_dep)) -> Minio:
     global _minio_client
     if _minio_client is None:
@@ -59,6 +62,25 @@ def get_minio(settings: Settings = Depends(get_settings_dep)) -> Minio:
             secure=settings.minio_secure,
         )
     return _minio_client
+
+
+def get_minio_presign(settings: Settings = Depends(get_settings_dep)) -> Minio:
+    """Client used only to sign URLs for the browser (MINIO_PUBLIC_ENDPOINT).
+
+    Inside Docker MINIO_ENDPOINT is ``minio:9000``, which browsers can't resolve, and the host is
+    part of the signature, so presigned URLs must be signed for the public host. The region is
+    fixed so signing never makes a network call to that host (it may not be reachable from here).
+    """
+    global _minio_presign_client
+    if _minio_presign_client is None:
+        _minio_presign_client = Minio(
+            settings.minio_public_endpoint or settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+            region=settings.minio_region,
+        )
+    return _minio_presign_client
 
 
 async def get_current_user(
@@ -103,6 +125,7 @@ UserDep = Annotated[UserContext, Depends(get_current_user)]
 ClickHouseDep = Annotated[Any, Depends(get_clickhouse)]
 RedisDep = Annotated[aioredis.Redis, Depends(get_redis)]
 MinioDep = Annotated[Minio, Depends(get_minio)]
+MinioPresignDep = Annotated[Minio, Depends(get_minio_presign)]
 
 AdminUserDep = Annotated[UserContext, Depends(require_roles(Role.admin))]
 OperatorUserDep = Annotated[UserContext, Depends(require_roles(Role.admin, Role.operator))]

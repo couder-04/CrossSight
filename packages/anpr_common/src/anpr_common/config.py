@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     minio_secret_key: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
     minio_bucket: str = Field(default="anpr-crops", alias="MINIO_BUCKET")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
+    minio_public_endpoint: str = Field(
+        default="",
+        alias="MINIO_PUBLIC_ENDPOINT",
+        description=(
+            "host:port browsers use to reach MinIO. Presigned URLs (camera wall, crops, alert "
+            "evidence) are signed for this host; the host is part of the signature, so they "
+            "can't be rewritten later. Empty = MINIO_ENDPOINT (fine outside Docker)."
+        ),
+    )
+    minio_region: str = Field(default="us-east-1", alias="MINIO_REGION")
 
     jwt_secret: str = Field(default=DEFAULT_JWT_SECRET, alias="JWT_SECRET")
     jwt_expire_minutes: int = Field(default=480, alias="JWT_EXPIRE_MINUTES")
