@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import math
+import statistics
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -31,6 +32,7 @@ from ocr_engine.detect import (
     rectify_plate,
     validate_plate_weights,
 )
+from ocr_engine.bytetrack import ByteTracker
 from ocr_engine.enhance import ClassicalDeblurEnhancer, enhance_plate
 from ocr_engine.fusion import FrameRead, fuse_track_reads
 from ocr_engine.recognize import MockRecognizer, ParseqRecognizer, Recognizer
@@ -59,6 +61,8 @@ class TrackState:
     last_bbox: tuple[int, int, int, int] | None = None
     lane: int | None = None
     frame_width: int = 0
+    last_text: str = ""
+    last_ocr_conf: float = 0.0
 
 
 def estimate_lane(
@@ -195,7 +199,7 @@ def build_recognizer(settings: Settings, use_mock: bool = False) -> Recognizer:
 
 class OCRPipeline:
     FUSION_MIN_FRAMES = 3
-    IOU_MATCH_THRESH = 0.3
+    IOU_MATCH_THRESH = 0.3  # legacy greedy fallback only
 
     def __init__(
         self,
@@ -206,12 +210,14 @@ class OCRPipeline:
         recognizer: Recognizer | None = None,
         backend: str | None = None,
         num_lanes: int = 3,
+        use_bytetrack: bool = True,
     ) -> None:
         self.settings = settings
         self.camera_id = camera_id
         self.camera_heading_deg = camera_heading_deg
         self.dry_run = dry_run
         self.num_lanes = max(1, num_lanes)
+        self.use_bytetrack = use_bytetrack
         chosen = (backend or settings.ocr_backend or "plateocr").lower()
         if chosen not in ("plateocr", "legacy"):
             raise ValueError(f"Unknown OCR backend: {chosen}")
@@ -227,6 +233,8 @@ class OCRPipeline:
         self.tracks: dict[int, TrackState] = {}
         self._active_ids: set[int] = set()
         self._next_track_id = 1
+        self.byte_tracker = ByteTracker(track_thresh=0.35, match_thresh=0.3, track_buffer=45)
+        self._annotate_writer: cv2.VideoWriter | None = None
 
         if self.backend == "plateocr":
             from ocr_engine.plateocr_backend import PlateOCRReader, ensure_plateocr_available
@@ -242,10 +250,11 @@ class OCRPipeline:
                 plate_format=settings.plateocr_plate_format or None,
             )
             logger.info(
-                "OCR pipeline backend=plateocr (det=%s ocr=%s format=%s)",
+                "OCR pipeline backend=plateocr (det=%s ocr=%s format=%s bytetrack=%s)",
                 settings.plateocr_detector,
                 settings.plateocr_ocr_model,
                 settings.plateocr_plate_format or "auto",
+                self.use_bytetrack,
             )
         else:
             weights = validate_plate_weights(settings.plate_det_weights)
@@ -261,12 +270,15 @@ class OCRPipeline:
         max_frames: int | None = None,
         reconnect: bool | None = None,
         reconnect_delay: float = 2.0,
+        annotate_out: str | None = None,
     ) -> int:
         """Process a video file or RTSP stream.
 
         RTSP sources reconnect by default; file sources do not.
+        If ``annotate_out`` is set, write an MP4 with boxes, track IDs, and OCR text.
         """
         self.publisher.connect()
+        self.byte_tracker.reset()
         is_stream = str(source).lower().startswith(("rtsp://", "http://", "https://"))
         do_reconnect = is_stream if reconnect is None else reconnect
         emitted = 0
@@ -282,9 +294,16 @@ class OCRPipeline:
 
                     time.sleep(reconnect_delay)
                     continue
-                # Prefer TCP for RTSP stability when OpenCV/FFmpeg supports it.
                 if is_stream:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                fps = float(cap.get(cv2.CAP_PROP_FPS) or 15.0)
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+                if annotate_out and self._annotate_writer is None and width > 0:
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    self._annotate_writer = cv2.VideoWriter(
+                        annotate_out, fourcc, max(fps, 1.0), (width, height)
+                    )
                 emptied = False
                 while True:
                     ok, frame = cap.read()
@@ -300,6 +319,8 @@ class OCRPipeline:
                         self._process_frame_plateocr(frame)
                     else:
                         self._process_frame_legacy(frame)
+                    if self._annotate_writer is not None:
+                        self._annotate_writer.write(self._draw_annotations(frame))
                     emitted += self._finalize_stale_tracks()
                 cap.release()
                 if max_frames and frame_idx >= max_frames:
@@ -313,7 +334,49 @@ class OCRPipeline:
         finally:
             emitted += self._finalize_all_tracks()
             self.publisher.close()
+            if self._annotate_writer is not None:
+                self._annotate_writer.release()
+                self._annotate_writer = None
+                logger.info("Wrote annotated video → %s", annotate_out)
         return emitted
+
+    def _draw_annotations(self, frame: np.ndarray) -> np.ndarray:
+        """Overlay ByteTrack IDs, boxes, and latest OCR text for active tracks."""
+        out = frame.copy()
+        palette = [
+            (0, 200, 255),
+            (80, 220, 100),
+            (255, 160, 40),
+            (200, 80, 255),
+            (60, 60, 255),
+            (255, 80, 120),
+        ]
+        for tid in sorted(self._active_ids):
+            state = self.tracks.get(tid)
+            if state is None or state.last_bbox is None:
+                continue
+            x1, y1, x2, y2 = state.last_bbox
+            color = palette[(tid - 1) % len(palette)]
+            cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+            label = f"ID {tid}"
+            if state.last_text:
+                label += f"  {state.last_text}"
+                if state.last_ocr_conf:
+                    label += f"  {state.last_ocr_conf:.2f}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            ty = max(0, y1 - th - 8)
+            cv2.rectangle(out, (x1, ty), (x1 + tw + 6, ty + th + 8), color, -1)
+            cv2.putText(
+                out,
+                label,
+                (x1 + 3, ty + th + 3),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+        return out
 
     def run_image(self, source: str) -> int:
         """Single-image ALPR (plateocr backend). Emits one event per plate found."""
@@ -355,62 +418,97 @@ class OCRPipeline:
     def _process_frame_plateocr(self, frame: np.ndarray) -> None:
         assert self.plateocr_reader is not None
         hits = self.plateocr_reader.read(frame)
-        current_ids: set[int] = set()
-        unmatched = set(self.tracks.keys())
         frame_h, frame_w = frame.shape[:2]
+        current_ids: set[int] = set()
 
-        for hit in hits:
-            best_tid: int | None = None
-            best_iou = 0.0
-            for tid in list(unmatched):
-                prev = self.tracks[tid].last_bbox
-                if prev is None:
+        if self.use_bytetrack:
+            dets = [(h.bbox, float(h.det_confidence)) for h in hits]
+            tracks = self.byte_tracker.update(dets)
+            # Map ByteTrack outputs → OCR hits via det_index (preferred) or IoU.
+            for tout in tracks:
+                hit = None
+                if tout.det_index is not None and 0 <= tout.det_index < len(hits):
+                    hit = hits[tout.det_index]
+                else:
+                    best_iou, best_h = 0.0, None
+                    for h in hits:
+                        iou = _bbox_iou(tout.bbox, h.bbox)
+                        if iou > best_iou:
+                            best_iou, best_h = iou, h
+                    if best_h is not None and best_iou >= 0.1:
+                        hit = best_h
+                if hit is None:
                     continue
-                iou = _bbox_iou(hit.bbox, prev)
-                if iou > best_iou:
-                    best_iou = iou
+                state = self.tracks.get(tout.track_id)
+                if state is None:
+                    state = TrackState(track_id=tout.track_id)
+                    self.tracks[tout.track_id] = state
+                self._accumulate_plateocr_hit(state, hit, frame, frame_h, frame_w)
+                current_ids.add(tout.track_id)
+        else:
+            # Legacy greedy IoU (can swap IDs when multiple cars are close).
+            unmatched = set(self.tracks.keys())
+            for hit in hits:
+                best_tid: int | None = None
+                best_iou = 0.0
+                for tid in list(unmatched):
+                    prev = self.tracks[tid].last_bbox
+                    if prev is None:
+                        continue
+                    iou = _bbox_iou(hit.bbox, prev)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_tid = tid
+                if best_tid is not None and best_iou >= self.IOU_MATCH_THRESH:
+                    state = self.tracks[best_tid]
+                    unmatched.discard(best_tid)
+                else:
+                    tid = self._next_track_id
+                    self._next_track_id += 1
+                    state = TrackState(track_id=tid)
+                    self.tracks[tid] = state
                     best_tid = tid
-
-            if best_tid is not None and best_iou >= self.IOU_MATCH_THRESH:
-                state = self.tracks[best_tid]
-                unmatched.discard(best_tid)
-            else:
-                tid = self._next_track_id
-                self._next_track_id += 1
-                state = TrackState(track_id=tid)
-                self.tracks[tid] = state
-                best_tid = tid
-
-            current_ids.add(best_tid)
-            state.frames_seen += 1
-            state.last_bbox = hit.bbox
-            state.frame_width = frame_w
-            state.centers.append(_bbox_center(hit.bbox))
-            state.lane = estimate_lane(hit.bbox, frame_w, self.num_lanes)
-            probs = hit.char_probs or [hit.ocr_confidence] * max(1, len(hit.text))
-            quality = float(hit.det_confidence)
-            x1, y1, x2, y2 = hit.bbox
-            crop = frame[max(0, y1) : min(frame_h, y2), max(0, x1) : min(frame_w, x2)]
-            enhanced_text = hit.text
-            if crop.size:
-                enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
-                # Always dual-pass: keep enhanced OCR when confidence is at least as good.
-                try:
-                    re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
-                    if re_text and re_conf >= hit.ocr_confidence - 1e-6:
-                        enhanced_text = re_text
-                        probs = re_probs or [re_conf] * max(1, len(re_text))
-                        quality = max(quality, float(re_conf))
-                except Exception:
-                    logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
-                if quality >= state.best_quality:
-                    state.best_quality = quality
-                    state.best_crop = enhanced.copy()
-            state.frame_reads.append(
-                FrameRead(text=enhanced_text, char_probs=probs, quality=quality)
-            )
+                self._accumulate_plateocr_hit(state, hit, frame, frame_h, frame_w)
+                current_ids.add(best_tid)
 
         self._active_ids = current_ids
+
+    def _accumulate_plateocr_hit(
+        self,
+        state: TrackState,
+        hit: Any,
+        frame: np.ndarray,
+        frame_h: int,
+        frame_w: int,
+    ) -> None:
+        state.frames_seen += 1
+        state.last_bbox = hit.bbox
+        state.frame_width = frame_w
+        state.centers.append(_bbox_center(hit.bbox))
+        state.lane = estimate_lane(hit.bbox, frame_w, self.num_lanes)
+        probs = hit.char_probs or [hit.ocr_confidence] * max(1, len(hit.text))
+        quality = float(hit.det_confidence)
+        x1, y1, x2, y2 = hit.bbox
+        crop = frame[max(0, y1) : min(frame_h, y2), max(0, x1) : min(frame_w, x2)]
+        enhanced_text = hit.text
+        if crop.size:
+            enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
+            try:
+                re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
+                if re_text and re_conf >= hit.ocr_confidence - 1e-6:
+                    enhanced_text = re_text
+                    probs = re_probs or [re_conf] * max(1, len(re_text))
+                    quality = max(quality, float(re_conf))
+            except Exception:
+                logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
+            if quality >= state.best_quality:
+                state.best_quality = quality
+                state.best_crop = enhanced.copy()
+        state.last_text = enhanced_text
+        state.last_ocr_conf = float(statistics.mean(probs)) if probs else float(hit.ocr_confidence)
+        state.frame_reads.append(
+            FrameRead(text=enhanced_text, char_probs=probs, quality=quality)
+        )
 
     def _process_frame_legacy(self, frame: np.ndarray) -> None:
         assert self.vehicle_detector is not None
@@ -531,6 +629,7 @@ class OCRPipeline:
             vehicle_class=VEHICLE_CLASS_MAP.get(state.vehicle_class, VehicleClass.car),
             crop_key=crop_key,
             source="ocr",
+            track_id=state.track_id,
         )
         self.publisher.publish(read)
         return True

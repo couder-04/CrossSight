@@ -83,6 +83,7 @@ class PlateRead(BaseModel):
     speed_kmh: float | None = None
     crop_key: str | None = None
     source: Literal["ocr", "simulator"] = "simulator"
+    track_id: int | None = None
 
     @field_validator("plate_norm")
     @classmethod

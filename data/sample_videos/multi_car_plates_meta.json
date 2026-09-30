@@ -1,0 +1,22 @@
+{
+  "path": "data/sample_videos/multi_car_plates.mp4",
+  "source_note": "Composite of 2 OpenALPR BR end-to-end cars (simultaneous, moving) to stress multi-object tracking",
+  "cars": [
+    {
+      "file": "AYO9034.jpg",
+      "plate_gt": "AYO9034",
+      "side": "left"
+    },
+    {
+      "file": "AZJ6991.jpg",
+      "plate_gt": "AZJ6991",
+      "side": "right"
+    }
+  ],
+  "frames": 75,
+  "fps": 15,
+  "size": [
+    1280,
+    540
+  ]
+}
