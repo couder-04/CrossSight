@@ -6,10 +6,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from anpr_common.schemas import AlertType, Direction, PlateFormat, PlateRead, VehicleClass
+from workers.alerts.engine import AlertsWorker
 from workers.alerts.registry import FileRegistryClient, RegistryRecord
 from workers.alerts.rules import (
     AlertDeduper,
     ClonedPlateRule,
+    ConvoyRule,
+    DefaultRuleContext,
     GeofenceRule,
     PlateVehicleMismatchRule,
     RouteAnomalyRule,
@@ -236,3 +239,66 @@ def test_alert_deduper_within_10_minutes():
         ts=datetime(2025, 1, 1, 10, 11, tzinfo=UTC),
     )
     assert deduper.is_duplicate(a3, datetime(2025, 1, 1, 10, 11, tzinfo=UTC)) is False
+
+
+class _ConvoyRedis:
+    def __init__(self) -> None:
+        self.zsets: dict[str, dict[str, float]] = {}
+
+    async def zadd(self, key: str, mapping: dict[str, float]) -> None:
+        self.zsets.setdefault(key, {}).update(mapping)
+
+    async def expire(self, key: str, _ttl: int) -> bool:
+        return True
+
+    async def zrangebyscore(self, key: str, min_s, max_s):
+        lo = float("-inf") if min_s in ("-inf", None) else float(min_s)
+        hi = float("inf") if max_s in ("+inf", None) else float(max_s)
+        return [m for m, s in self.zsets.get(key, {}).items() if lo <= float(s) <= hi]
+
+    async def zscore(self, key: str, member: str) -> float | None:
+        return self.zsets.get(key, {}).get(member)
+
+    def pipeline(self, transaction: bool = False):
+        return _ConvoyPipe(self)
+
+
+class _ConvoyPipe:
+    def __init__(self, redis: _ConvoyRedis) -> None:
+        self.redis = redis
+        self.ops: list[tuple] = []
+
+    def zadd(self, key, mapping):
+        self.ops.append(("zadd", key, mapping))
+        return self
+
+    def expire(self, key, ttl):
+        self.ops.append(("expire", key, ttl))
+        return self
+
+    async def execute(self):
+        for op in self.ops:
+            if op[0] == "zadd":
+                await self.redis.zadd(op[1], op[2])
+            else:
+                await self.redis.expire(op[1], op[2])
+
+
+@pytest.mark.asyncio
+async def test_convoy_rule_excludes_self_after_prime():
+    """Plate A is written into convoy state before evaluation and must not alert as its own peer."""
+    redis = _ConvoyRedis()
+    ctx = DefaultRuleContext(
+        settings=SimpleNamespace(max_urban_speed_kmh=120.0),
+        cameras={"cam-1": CameraInfo("cam-1", 18.5, 73.8, 0.0, "N")},
+        watchlist=set(),
+        pairs=[],
+        redis=redis,
+        pg_pool=None,
+    )
+    read = _read(plate="MH01AA0001", camera="cam-1")
+    await AlertsWorker._prime_convoy_state(SimpleNamespace(_redis=redis), read)
+    peers = await ctx.convoy_peers(read.plate_norm, read.camera_id, read.ts)
+    assert read.plate_norm.upper() not in peers
+    alerts = await ConvoyRule().evaluate(read, ctx)
+    assert alerts == []
