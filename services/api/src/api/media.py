@@ -3,27 +3,57 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _recognizer: Any = None
+_recognizer_lock = threading.Lock()
 
 
-def recognize_bgr(image: Any) -> dict[str, Any]:
-    """Run the configured PlateOCR recognizer. Raises if weights cannot be loaded."""
+def _get_recognizer() -> Any:
+    """One PlateOCR recognizer per API process, configured from Settings like the OCR engine."""
     global _recognizer
-    if _recognizer is None:
-        from ocr_engine.plateocr_backend import PlateOCRRecognizer
+    with _recognizer_lock:
+        if _recognizer is None:
+            from anpr_common.config import get_settings
+            from ocr_engine.plateocr_backend import PlateOCRRecognizer
 
-        _recognizer = PlateOCRRecognizer()
-    result = _recognizer.recognize(image)
-    return {
-        "plate": result.text,
-        "confidence": float(result.confidence),
-        "char_probs": [float(value) for value in result.char_probs],
-    }
+            settings = get_settings()
+            _recognizer = PlateOCRRecognizer(
+                detector_model=settings.plateocr_detector,
+                ocr_model=settings.plateocr_ocr_model,
+                device=settings.plateocr_device,
+                det_conf=settings.plateocr_det_conf,
+                min_ocr_conf=settings.plateocr_min_ocr_conf,
+                ocr_config=settings.plateocr_ocr_config or None,
+                plate_format=settings.plateocr_plate_format or None,
+                tta=settings.plateocr_tta,
+                bbox_pad=settings.plateocr_bbox_pad,
+            )
+    return _recognizer
+
+
+def detect_plates_bgr(image: Any) -> list[dict[str, Any]]:
+    """Detect and read every plate in a full photo/frame. Raises if weights cannot be loaded.
+
+    Uses the detector first: running plate OCR on a whole photo returns an invented plate,
+    because the format-constrained decoder always produces some valid-looking string.
+    Reads below ``PLATEOCR_MIN_OCR_CONF`` are already dropped by the reader.
+    """
+    hits = _get_recognizer().read_scene(image)
+    return [
+        {
+            "plate": hit.text,
+            "confidence": float(hit.ocr_confidence),
+            "char_probs": [float(value) for value in (hit.char_probs or [])],
+            "bbox": list(hit.bbox),
+        }
+        for hit in hits
+    ]
 
 
 def decode_image(data: bytes) -> Any:
@@ -68,30 +98,36 @@ def reads_from_frames(
     source_key: str,
     fps: float,
     every_n: int,
-    recognize=recognize_bgr,
+    detect: Callable[[Any], list[dict[str, Any]]] = detect_plates_bgr,
 ) -> list[dict[str, Any]]:
-    """Turn sampled frames into plate-read records using an injected recognizer."""
+    """Turn sampled frames into plate-read records, one per distinct plate in the clip.
+
+    The same vehicle usually appears in many sampled frames; each plate text is reported once,
+    using the frame where it was read with the highest confidence.
+    """
     from datetime import timedelta
 
     step_s = every_n / fps if fps else 1.0
-    reads: list[dict[str, Any]] = []
+    best: dict[str, dict[str, Any]] = {}
     for index, frame in enumerate(frames):
         try:
-            found = recognize(frame)
+            found = detect(frame)
         except Exception as exc:  # noqa: BLE001
             logger.warning("frame OCR failed: %s", exc)
             continue
-        plate = str(found.get("plate") or "")
-        if not plate or plate == "UNKNOWN":
-            continue
-        reads.append(
-            {
+        for plate_hit in found:
+            plate = str(plate_hit.get("plate") or "")
+            if not plate or plate == "UNKNOWN":
+                continue
+            confidence = float(plate_hit.get("confidence") or 0.0)
+            if plate in best and best[plate]["confidence"] >= confidence:
+                continue
+            best[plate] = {
                 "camera_id": camera_id,
                 "ts": (started_at + timedelta(seconds=index * step_s)).isoformat(),
                 "plate": plate,
-                "confidence": found.get("confidence"),
+                "confidence": confidence,
                 "source_video_key": source_key,
                 "frame_index": index * every_n,
             }
-        )
-    return reads
+    return sorted(best.values(), key=lambda read: read["frame_index"])

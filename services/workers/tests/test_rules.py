@@ -85,6 +85,20 @@ async def test_watchlist_fuzzy_match():
 
 
 @pytest.mark.asyncio
+async def test_watchlist_ignores_low_confidence_reads():
+    rule = WatchlistRule()
+    assert await rule.evaluate(_read(plate="WL01AB9999", confidence=0.3), _ctx()) == []
+    assert await rule.evaluate(_read(plate="WL01AB9998", confidence=0.3), _ctx()) == []
+
+
+@pytest.mark.asyncio
+async def test_watchlist_min_conf_comes_from_settings():
+    ctx = _ctx(settings=SimpleNamespace(max_urban_speed_kmh=120.0, watchlist_min_conf=0.9))
+    alerts = await WatchlistRule().evaluate(_read(plate="WL01AB9999", confidence=0.85), ctx)
+    assert alerts == []
+
+
+@pytest.mark.asyncio
 async def test_cloned_plate_impossible_speed():
     prev_ts = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
     ctx = _ctx(

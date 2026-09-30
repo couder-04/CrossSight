@@ -42,7 +42,7 @@ from api.db import (
     get_session_factory,
 )
 from api.deps import get_clickhouse, get_minio
-from api.media import decode_image, reads_from_frames, recognize_bgr, sample_video
+from api.media import decode_image, detect_plates_bgr, reads_from_frames, sample_video
 
 logger = logging.getLogger(__name__)
 
@@ -332,15 +332,16 @@ async def _process_media(upload_id: UUID) -> None:
             obj.release_conn()
             result: dict[str, Any]
             if row.kind == "image":
-                found = recognize_bgr(decode_image(data))
+                ts = (row.captured_at or started).isoformat()
                 result = {
                     "reads": [
                         {
                             "plate": found["plate"],
                             "confidence": found["confidence"],
-                            "ts": (row.captured_at or started).isoformat(),
+                            "ts": ts,
                             "camera_id": row.camera_id,
                         }
+                        for found in detect_plates_bgr(decode_image(data))
                     ],
                     "source_key": row.object_key,
                 }

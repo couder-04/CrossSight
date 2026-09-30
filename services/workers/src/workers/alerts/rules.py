@@ -71,10 +71,18 @@ def _read_evidence(read: PlateRead) -> dict[str, Any]:
     }
 
 
+WATCHLIST_MIN_CONF_DEFAULT = 0.5
+
+
 class WatchlistRule(Rule):
     name = "watchlist"
 
     async def evaluate(self, read: PlateRead, ctx: RuleContext) -> list[Alert]:
+        # Low-confidence reads are mostly misreads; with fuzzy matching at edit cost 1 they can
+        # land on a watchlisted plate and raise a false alert.
+        min_conf = getattr(ctx.settings, "watchlist_min_conf", WATCHLIST_MIN_CONF_DEFAULT)
+        if read.confidence < min_conf:
+            return []
         plate = read.plate_norm.upper()
         if plate in ctx.watchlist:
             return [
