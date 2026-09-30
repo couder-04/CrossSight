@@ -85,7 +85,7 @@ export function WallView() {
 
   useEffect(() => {
     let socket: { close: () => void } | null = null;
-    let off = () => undefined;
+    let off: () => void = () => undefined;
     let closed = false;
 
     openWallSocket()
