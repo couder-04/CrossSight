@@ -6,5 +6,6 @@ export async function POST() {
   const options = sessionCookieOptions(0);
   response.cookies.set(AUTH_COOKIE, "", options);
   response.cookies.set(USER_COOKIE, "", options);
+  response.cookies.set("anpr_source", "", { ...options, httpOnly: false });
   return response;
 }

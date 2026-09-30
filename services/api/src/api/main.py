@@ -27,6 +27,7 @@ from api.routes import (
     exports,
     imports,
     platform,
+    sources,
     trajectory,
     uploads,
     watchlist,
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router)
     app.include_router(exports.router)
     app.include_router(evidence.router)
+    app.include_router(sources.router)
     app.include_router(crops.router)
     app.include_router(audit.router)
     app.include_router(ws.router)

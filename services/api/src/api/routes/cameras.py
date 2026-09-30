@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from geoalchemy2 import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
 from minio.error import S3Error
@@ -15,6 +15,7 @@ from sqlalchemy.engine import CursorResult
 from api.db import Camera
 from api.deps import AdminUserDep, MinioDep, SessionDep, SettingsDep, UserDep
 from api.schemas import CameraCreate, CameraOut, CameraUpdate
+from api.video_feeds import camera_in_source, normalize_source
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
 
@@ -53,11 +54,13 @@ async def list_cameras(
     _user: UserDep,
     minio: MinioDep,
     settings: SettingsDep,
+    source: str = Query("sim"),
 ) -> list[CameraOut]:
     result = await session.execute(
         select(Camera, ST_Y(Camera.geom).label("lat"), ST_X(Camera.geom).label("lng"))
     )
-    rows = result.all()
+    mode = normalize_source(source)
+    rows = [row for row in result.all() if camera_in_source(row[0].id, mode)]
     return [
         _camera_out(
             cam,

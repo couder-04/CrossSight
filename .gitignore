@@ -26,6 +26,7 @@ build/
 *.ses
 apps/dashboard/src/types/generated/
 services/simulator/data/cache/
+/data/drive_cameras/
 *.pt
 *.onnx
 *.engine

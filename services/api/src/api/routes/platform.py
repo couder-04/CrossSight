@@ -18,6 +18,7 @@ from sqlalchemy import select
 from api.auditutil import audit_row
 from api.db import AlertRow, Camera
 from api.deps import ClickHouseDep, OperatorUserDep, SessionDep, SettingsDep, UserDep
+from api.video_feeds import normalize_source
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -556,6 +557,7 @@ async def recent_reads(
     _user: UserDep,
     camera_id: str | None = None,
     limit: int = Query(40, ge=1, le=200),
+    source: str = Query("sim"),
 ) -> dict[str, Any]:
     end = datetime.now(UTC)
     start = end - timedelta(minutes=15)
@@ -564,6 +566,10 @@ async def recent_reads(
     if camera_id:
         where += " AND camera_id = {camera:String}"
         params["camera"] = camera_id
+    elif normalize_source(source) == "video":
+        where += " AND camera_id LIKE 'vid-%'"
+    else:
+        where += " AND camera_id NOT LIKE 'vid-%'"
     try:
         rows = _query(
             ch,

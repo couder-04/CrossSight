@@ -157,6 +157,24 @@ def fleet_cmd(
         sys.exit(1)
 
 
+@main.command("video-city")
+@click.option("--config", required=True, type=click.Path(exists=True), help="Fleet JSON of video files")
+@click.option("--workers", type=int, default=None, help="OCR workers rotating across the videos")
+@click.option("--stride", type=int, default=None, help="Run OCR on every Nth frame")
+def video_city_cmd(config: str, workers: int | None, stride: int | None) -> None:
+    """Loop video files as camera streams and read plates from them."""
+    from ocr_engine.video_city import run_video_city
+
+    try:
+        run_video_city(config, workers=workers, stride=stride)
+    except KeyboardInterrupt:
+        click.echo("Interrupted", err=True)
+        sys.exit(130)
+    except (RuntimeError, OSError, ValueError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @main.command("image")
 @click.option("--source", required=True, help="Image file path")
 @click.option("--camera-id", default="cam-demo", help="Camera id for event payload")

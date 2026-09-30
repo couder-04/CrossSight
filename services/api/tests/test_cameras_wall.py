@@ -64,6 +64,7 @@ def wall_client():
     rows = [
         (_camera("cam-live", "Gate A"), 18.52, 73.85),
         (_camera("cam-dark", "Gate B"), 18.53, 73.86),
+        (_camera("vid-01", "Traffic clip"), 18.52, 73.86),
     ]
 
     async def _session():
@@ -92,6 +93,15 @@ def test_camera_list_has_live_frame(wall_client):
     assert by_id["cam-live"]["name"] == "Gate A"
     assert by_id["cam-live"]["lat"] == pytest.approx(18.52)
     assert by_id["cam-live"]["lng"] == pytest.approx(73.85)
+    assert "vid-01" not in by_id
+
+
+def test_video_source_lists_only_video_cameras(wall_client):
+    client, _minio = wall_client
+    resp = client.get("/cameras?source=video")
+    assert resp.status_code == 200
+    ids = [row["id"] for row in resp.json()]
+    assert ids == ["vid-01"]
 
 
 def test_camera_frame_url_or_404(wall_client):

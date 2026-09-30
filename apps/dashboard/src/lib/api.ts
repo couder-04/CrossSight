@@ -1,3 +1,4 @@
+import { sourceMode } from "@/lib/source";
 import type {
   Alert,
   AuditEntry,
@@ -80,7 +81,7 @@ export const api = {
   },
 
   cameras(token?: string) {
-    return request<Camera[]>("/cameras", { token });
+    return request<Camera[]>(`/cameras?source=${sourceMode()}`, { token });
   },
 
   cameraFrame(id: string, cacheBust?: number) {
@@ -136,8 +137,8 @@ export const api = {
   },
 
   alerts(params: Record<string, string> = {}, token?: string) {
-    const qs = new URLSearchParams(params).toString();
-    return request<Alert[]>(`/alerts${qs ? `?${qs}` : ""}`, { token });
+    const qs = new URLSearchParams({ ...params, source: sourceMode() }).toString();
+    return request<Alert[]>(`/alerts?${qs}`, { token });
   },
 
   alert(id: string, token?: string) {
@@ -181,7 +182,7 @@ export const api = {
   },
 
   heatmap(window = "15m", token?: string, at?: string) {
-    const qs = new URLSearchParams({ window });
+    const qs = new URLSearchParams({ window, source: sourceMode() });
     if (at) qs.set("at", at);
     return request<HeatmapResponse>(`/analytics/heatmap?${qs}`, { token });
   },
@@ -257,8 +258,9 @@ export const api = {
   },
 
   recentReads(cameraId?: string, token?: string) {
-    const qs = cameraId ? `?camera_id=${encodeURIComponent(cameraId)}` : "";
-    return request<{ reads: Array<Record<string, unknown>> }>(`/ops/reads${qs}`, { token });
+    const qs = new URLSearchParams({ source: sourceMode() });
+    if (cameraId) qs.set("camera_id", cameraId);
+    return request<{ reads: Array<Record<string, unknown>> }>(`/ops/reads?${qs}`, { token });
   },
 
   investigation(plate: string, token?: string) {

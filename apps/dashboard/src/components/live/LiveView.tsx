@@ -14,6 +14,7 @@ import { Kpi } from "@/components/ui/Kpi";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Timestamp } from "@/components/ui/Timestamp";
 import { api } from "@/lib/api";
+import { alertInSource, cameraInSource, sourceMode } from "@/lib/source";
 import { getPrefs, updatePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/toast";
 import { LiveSocket } from "@/lib/ws";
@@ -101,8 +102,9 @@ export function LiveView() {
       return;
     }
     setError(null);
+    const video = sourceMode() === "video";
     if (settled[0].status === "fulfilled") setCameras(settled[0].value);
-    if (settled[1].status === "fulfilled") setSegments(settled[1].value.segments);
+    if (settled[1].status === "fulfilled") setSegments(video ? [] : settled[1].value.segments);
     if (settled[2].status === "fulfilled") applyHeat(settled[2].value);
     if (settled[3].status === "fulfilled") {
       const recent = settled[3].value;
@@ -114,7 +116,11 @@ export function LiveView() {
       );
       setAlerts(recent.slice(0, 20));
     }
-    api.routeDensity("1h").then((density) => setRouteCorridors(density.corridors ?? [])).catch(() => undefined);
+    if (video) {
+      setRouteCorridors([]);
+    } else {
+      api.routeDensity("1h").then((density) => setRouteCorridors(density.corridors ?? [])).catch(() => undefined);
+    }
     api.recentReads().then((res) => {
       const rows = (res.reads ?? []) as unknown as LiveRead[];
       setReads(rows.slice(0, 30));
@@ -135,6 +141,14 @@ export function LiveView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (sourceMode() !== "video") return;
+    const id = window.setInterval(() => {
+      api.heatmap("15m").then(applyHeat).catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(id);
+  }, [applyHeat]);
 
   useEffect(() => {
     if (!focusId || !mapRef.current) return;
@@ -164,7 +178,9 @@ export function LiveView() {
     socket.subscribe(["heatmap", "alerts", "flow", "reads"]);
 
     const off = socket.onMessage((msg) => {
+      const video = sourceMode() === "video";
       if (msg.channel === "heatmap") {
+        if (video) return;
         const data = msg.data as HeatmapWsPayload;
         const h3 = h3IntToString(data.h3_cell ?? data.h3 ?? 0);
         setHeatmap((prev) => {
@@ -175,6 +191,7 @@ export function LiveView() {
       }
       if (msg.channel === "alerts") {
         const alert = msg.data as Alert;
+        if (!alertInSource(alert.camera_ids)) return;
         setAlerts((prev) => [alert, ...prev].slice(0, 20));
         if ((alert.severity === "high" || alert.severity === "critical") && (alert.status ?? "new") === "new") {
           setCriticalActive((count) => count + 1);
@@ -183,10 +200,12 @@ export function LiveView() {
       }
       if (msg.channel === "flow") {
         const fw = msg.data as FlowWindow;
+        if (!cameraInSource(fw.camera_id)) return;
         setFlowByCamera((prev) => new Map(prev).set(fw.camera_id, fw));
       }
       if (msg.channel === "reads") {
         const read = msg.data as LiveRead;
+        if (!cameraInSource(read.camera_id)) return;
         setReads((prev) => [read, ...prev].slice(0, 30));
         setReadTotal((count) => count + 1);
         const now = Date.now();
@@ -359,19 +378,15 @@ export function LiveView() {
   }
 
   function toggleReads() {
-    setReadsOpen((open) => {
-      const next = !open;
-      updatePrefs({ liveSidebar: { ...getPrefs().liveSidebar, reads: next } });
-      return next;
-    });
+    const next = !readsOpen;
+    setReadsOpen(next);
+    updatePrefs({ liveSidebar: { ...getPrefs().liveSidebar, reads: next } });
   }
 
   function toggleAlerts() {
-    setAlertsOpen((open) => {
-      const next = !open;
-      updatePrefs({ liveSidebar: { ...getPrefs().liveSidebar, alerts: next } });
-      return next;
-    });
+    const next = !alertsOpen;
+    setAlertsOpen(next);
+    updatePrefs({ liveSidebar: { ...getPrefs().liveSidebar, alerts: next } });
   }
 
   if (booting && cameras.length === 0 && !error) {

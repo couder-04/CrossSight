@@ -16,6 +16,7 @@ from api.auditutil import audit_row
 from api.db import AlertReviewRow, AlertRow
 from api.deps import MinioDep, OperatorUserDep, SessionDep, SettingsDep, UserDep
 from api.schemas import AlertActionBody, AlertOut, DispatchBody, ReviewBody
+from api.video_feeds import camera_in_source, normalize_source
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -70,6 +71,7 @@ async def list_alerts(
     status_filter: str | None = Query(None, alias="status"),
     type_filter: str | None = Query(None, alias="type"),
     severity: str | None = Query(None),
+    source: str = Query("sim"),
 ) -> list[AlertOut]:
     stmt = select(AlertRow).order_by(AlertRow.created_at.desc())
     if status_filter:
@@ -79,7 +81,20 @@ async def list_alerts(
     if severity:
         stmt = stmt.where(AlertRow.severity == severity)
     result = await session.execute(stmt)
-    return [_alert_out(r) for r in result.scalars()]
+    mode = normalize_source(source)
+    rows = [
+        row
+        for row in result.scalars()
+        if _alert_in_source(list(row.camera_ids or []), mode)
+    ]
+    return [_alert_out(r) for r in rows]
+
+
+def _alert_in_source(camera_ids: list[str], source: str) -> bool:
+    video_hit = any(camera_in_source(camera_id, "video") for camera_id in camera_ids)
+    if source == "video":
+        return video_hit
+    return not video_hit
 
 
 @router.get("/{alert_id}", response_model=AlertOut)
