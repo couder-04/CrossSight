@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
+import os
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
+
+import aiofiles
 
 from anpr_common.config import get_settings
 from anpr_common.intelligence.access import export_action, role_can
@@ -95,6 +99,63 @@ def _store(minio, settings, key: str, data: bytes, content_type: str) -> None:
     if not minio.bucket_exists(settings.minio_bucket):
         minio.make_bucket(settings.minio_bucket)
     minio.put_object(settings.minio_bucket, key, io.BytesIO(data), length=len(data), content_type=content_type)
+
+
+_UPLOAD_CHUNK = 1024 * 1024
+
+
+def _declared_length(upload: UploadFile) -> int | None:
+    size = getattr(upload, "size", None)
+    if isinstance(size, int) and size >= 0:
+        return size
+    headers = getattr(upload, "headers", None)
+    raw = headers.get("content-length") if headers is not None else None
+    if raw is not None and str(raw).isdigit():
+        return int(raw)
+    return None
+
+
+async def _stream_upload(upload: UploadFile, max_bytes: int) -> tuple[Path, int, str, bytes]:
+    """Write the upload to a temp file in 1 MiB chunks. Returns path, size, sha256, header."""
+    declared = _declared_length(upload)
+    if declared is not None and declared > max_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File is too large")
+    fd, name = tempfile.mkstemp(prefix="anpr-upload-")
+    os.close(fd)
+    path = Path(name)
+    hasher = hashlib.sha256()
+    total = 0
+    header = b""
+    try:
+        async with aiofiles.open(path, "wb") as handle:
+            while True:
+                chunk = await upload.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File is too large",
+                    )
+                if len(header) < 64:
+                    header += chunk[: 64 - len(header)]
+                hasher.update(chunk)
+                await handle.write(chunk)
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return path, total, hasher.hexdigest(), header
+
+
+def _store_file(minio, settings, key: str, path: Path, length: int, content_type: str) -> None:
+    if not minio.bucket_exists(settings.minio_bucket):
+        minio.make_bucket(settings.minio_bucket)
+    with path.open("rb") as handle:
+        minio.put_object(settings.minio_bucket, key, handle, length=length, content_type=content_type)
 
 
 def _upload_out(row: UploadRow) -> dict[str, Any]:
@@ -362,39 +423,50 @@ async def upload_media(
     camera = await session.get(Camera, camera_id)
     if camera is None:
         raise HTTPException(status_code=400, detail="Unknown camera")
-    limit = settings.max_upload_video_bytes if kind == "video" else settings.max_upload_image_bytes
-    data = await _read_limited(file, limit)
+    kind_limit = settings.max_upload_video_bytes if kind == "video" else settings.max_upload_image_bytes
+    limit = min(kind_limit, settings.max_upload_bytes)
+    path, total, digest, header = await _stream_upload(file, limit)
     try:
-        meta = validate_upload(
-            filename=file.filename or f"upload.{ 'mp4' if kind == 'video' else 'jpg'}",
-            data=data,
+        try:
+            meta = validate_upload(
+                filename=file.filename or f"upload.{'mp4' if kind == 'video' else 'jpg'}",
+                data=header if header else b"",
+                kind=kind,
+                max_bytes=limit,
+                claimed_type=file.content_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        meta["size"] = total
+        row = UploadRow(
             kind=kind,
-            max_bytes=limit,
-            claimed_type=file.content_type,
+            filename=meta["filename"],
+            mime=meta["mime"],
+            size_bytes=meta["size"],
+            status="queued",
+            uploaded_by=user.username,
+            camera_id=camera_id,
+            zone_id=zone_id,
+            captured_at=_dt(captured_at) if captured_at else datetime.now(UTC),
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    row = UploadRow(
-        kind=kind,
-        filename=meta["filename"],
-        mime=meta["mime"],
-        size_bytes=meta["size"],
-        status="queued",
-        uploaded_by=user.username,
-        camera_id=camera_id,
-        zone_id=zone_id,
-        captured_at=_dt(captured_at) if captured_at else datetime.now(UTC),
-    )
-    session.add(row)
-    await session.flush()
-    key = object_key(f"uploads/{kind}", str(row.id), meta["filename"])
-    _store(minio, settings, key, data, meta["mime"])
-    row.object_key = key
-    session.add(audit_row(user, "media_upload", params={"id": str(row.id), "kind": kind, "camera_id": camera_id}))
-    await session.commit()
-    background.add_task(_process_media, row.id)
-    await session.refresh(row)
-    return _upload_out(row)
+        session.add(row)
+        await session.flush()
+        key = object_key(f"uploads/{kind}", str(row.id), meta["filename"])
+        _store_file(minio, settings, key, path, total, meta["mime"])
+        row.object_key = key
+        session.add(
+            audit_row(
+                user,
+                "media_upload",
+                params={"id": str(row.id), "kind": kind, "camera_id": camera_id, "sha256": digest},
+            )
+        )
+        await session.commit()
+        background.add_task(_process_media, row.id)
+        await session.refresh(row)
+        return _upload_out(row)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 async def _process_media(upload_id: UUID) -> None:

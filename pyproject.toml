@@ -34,6 +34,7 @@ dependencies = [
   "geoalchemy2>=0.15",
   "shapely>=2.0",
   "pyyaml>=6.0",
+  "aiofiles>=25.1.0",
 ]
 
 [project.optional-dependencies]
