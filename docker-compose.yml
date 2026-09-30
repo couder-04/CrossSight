@@ -287,6 +287,7 @@ services:
       MINIO_ENDPOINT: minio:9000
     volumes:
       - ./models:/models:ro
+      - ocr_model_cache:/root/.cache
     depends_on:
       redpanda:
         condition: service_healthy
@@ -306,11 +307,13 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ./models:/models:ro
+      - ocr_model_cache:/root/.cache
     depends_on:
       redpanda:
         condition: service_healthy
 
 volumes:
+  ocr_model_cache:  # detector + OCR weights, downloaded once
   clickhouse_data:
   postgres_data:
   minio_data:
