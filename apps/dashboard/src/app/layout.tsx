@@ -17,12 +17,21 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "ANPR Control Room",
   description: "City-wide ANPR intelligence dashboard",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var p=JSON.parse(localStorage.getItem('crosssight:prefs')||'{}');document.documentElement.dataset.density=p.density==='compact'?'compact':'comfortable';}catch(e){document.documentElement.dataset.density='comfortable';}",
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

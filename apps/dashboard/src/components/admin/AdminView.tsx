@@ -4,10 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { Button } from "@/components/ui/Button";
+import { CameraStatusDot } from "@/components/ui/CameraStatusDot";
 import { Input } from "@/components/ui/Input";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { Timestamp } from "@/components/ui/Timestamp";
 import { api } from "@/lib/api";
-import { formatTs } from "@/lib/utils";
 import type { AuditEntry, Camera, WatchlistEntry, Zone } from "@/types";
 
 type Tab = "cameras" | "zones" | "watchlist" | "audit";
@@ -117,7 +118,12 @@ export function AdminView() {
                     <tr key={c.id}>
                       <td className="font-mono text-xs">{c.id}</td>
                       <td>{c.name}</td>
-                      <td>{c.status}</td>
+                      <td>
+                        <span className="inline-flex items-center gap-2">
+                          <CameraStatusDot status={c.status} />
+                          {c.status}
+                        </span>
+                      </td>
                       <td>{c.lanes}</td>
                       <td className="font-mono text-xs">{c.lat.toFixed(4)}, {c.lng.toFixed(4)}</td>
                     </tr>
@@ -220,7 +226,7 @@ export function AdminView() {
               <tbody>
                 {audit.map((a) => (
                   <tr key={a.id}>
-                    <td className="text-xs text-muted">{formatTs(a.ts)}</td>
+                    <td className="text-xs text-muted"><Timestamp iso={a.ts} /></td>
                     <td>{a.action}</td>
                     <td className="font-mono text-xs">{a.plate_norm ?? "—"}</td>
                     <td className="font-mono text-xs">{a.case_id ?? "—"}</td>

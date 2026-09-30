@@ -4,13 +4,17 @@ const WS_URL =
   process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws/live";
 
 export type WsHandler = (message: WsMessage) => void;
+export type SocketState = "live" | "reconnecting" | "offline";
+type StateHandler = (state: SocketState) => void;
 
 export class LiveSocket {
   private ws: WebSocket | null = null;
   private handlers = new Set<WsHandler>();
+  private stateHandlers = new Set<StateHandler>();
   private subscribed = new Set<string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private failures = 0;
   private url: string;
 
   constructor(url?: string) {
@@ -23,6 +27,8 @@ export class LiveSocket {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
+      this.failures = 0;
+      this.emitState("live");
       if (this.subscribed.size > 0) {
         this.send({ subscribe: Array.from(this.subscribed) });
       }
@@ -39,9 +45,20 @@ export class LiveSocket {
 
     this.ws.onclose = () => {
       if (!this.closed) {
+        this.failures += 1;
+        this.emitState(this.failures >= 3 ? "offline" : "reconnecting");
         this.reconnectTimer = setTimeout(() => this.connect(), 3000);
       }
     };
+  }
+
+  onState(handler: StateHandler) {
+    this.stateHandlers.add(handler);
+    return () => this.stateHandlers.delete(handler);
+  }
+
+  private emitState(state: SocketState) {
+    this.stateHandlers.forEach((handler) => handler(state));
   }
 
   subscribe(channels: string[]) {

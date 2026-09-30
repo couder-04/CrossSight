@@ -15,11 +15,14 @@ import {
 } from "recharts";
 import { DeckMap, flyTo } from "@/components/map/DeckMap";
 import { ErrorState } from "@/components/common/ErrorState";
-import { LoadingState } from "@/components/common/LoadingState";
 import { Button } from "@/components/ui/Button";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { Kpi } from "@/components/ui/Kpi";
 import { Select } from "@/components/ui/Select";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { formatTsWithZone } from "@/lib/utils";
 import type { Bottleneck, Camera, ODCell, VolumeAnomaly } from "@/types";
 import type maplibregl from "maplibre-gl";
 
@@ -43,6 +46,7 @@ export function AnalyticsView() {
   const [anomalies, setAnomalies] = useState<VolumeAnomaly[]>([]);
   const [selectedCamera, setSelectedCamera] = useState("");
   const [flowData, setFlowData] = useState<{ time: string; volume: number; speed: number | null }[]>([]);
+  const [vehiclesLastHour, setVehiclesLastHour] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mapRef, setMapRef] = useState<maplibregl.Map | null>(null);
@@ -50,23 +54,38 @@ export function AnalyticsView() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const [cams, od, bn, an] = await Promise.all([
-        api.cameras(),
-        api.od(hour, date),
-        api.bottlenecks(),
-        api.anomalies(),
-      ]);
-      setCameras(cams);
-      setOdCells(od.cells);
-      setBottlenecks(bn.bottlenecks);
-      setAnomalies(an.anomalies);
-      if (!selectedCamera && cams[0]) setSelectedCamera(cams[0].id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
-    } finally {
+    const settled = await Promise.allSettled([
+      api.cameras(),
+      api.od(hour, date),
+      api.bottlenecks(),
+      api.anomalies(),
+      api.heatmap("1h"),
+    ]);
+    const labels = ["cameras", "origin-destination", "bottlenecks", "anomalies", "vehicles"] as const;
+    let failures = 0;
+    settled.forEach((result, index) => {
+      if (result.status === "rejected") {
+        failures += 1;
+        toast.error(`Failed to load ${labels[index]}. Retry`, () => { void load(); });
+      }
+    });
+    if (failures === settled.length) {
+      setError("Failed to load analytics");
       setLoading(false);
+      return;
     }
+    setError(null);
+    if (settled[0].status === "fulfilled") {
+      setCameras(settled[0].value);
+      if (!selectedCamera && settled[0].value[0]) setSelectedCamera(settled[0].value[0].id);
+    }
+    if (settled[1].status === "fulfilled") setOdCells(settled[1].value.cells);
+    if (settled[2].status === "fulfilled") setBottlenecks(settled[2].value.bottlenecks);
+    if (settled[3].status === "fulfilled") setAnomalies(settled[3].value.anomalies);
+    if (settled[4].status === "fulfilled") {
+      setVehiclesLastHour(settled[4].value.cells.reduce((sum, cell) => sum + cell.count, 0));
+    }
+    setLoading(false);
   }, [hour, date]);
 
   useEffect(() => {
@@ -82,7 +101,7 @@ export function AnalyticsView() {
       .then((res) => {
         setFlowData(
           res.windows.map((w) => ({
-            time: new Date(w.window_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            time: formatTsWithZone(w.window_start).primary,
             volume: w.volume ?? 0,
             speed: w.avg_speed_kmh ?? null,
           })),
@@ -125,11 +144,25 @@ export function AnalyticsView() {
     if (cam && mapRef) flyTo(mapRef, cam.lng, cam.lat, 14);
   }
 
-  if (loading) return <LoadingState label="Loading analytics…" />;
-  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (loading && cameras.length === 0 && !error) {
+    return (
+      <div className="h-full p-4 space-y-3">
+        <Skeleton className="h-20 w-48" />
+        <Skeleton className="h-full min-h-64" />
+      </div>
+    );
+  }
+  if (error && cameras.length === 0) return <ErrorState message={error} onRetry={load} />;
+
+  const generated = formatTsWithZone(new Date().toISOString()).primary;
 
   return (
     <div className="h-full grid grid-rows-[1fr_auto] lg:grid-rows-1 lg:grid-cols-[1fr_22rem]">
+      <div className="print-only px-4 py-3">
+        <p>CrossSight — Trajectory Report</p>
+        <p>Plate: —  Case: —  Range: {date} {hour}:00 → {hour}:59</p>
+        <p>Generated: {generated}</p>
+      </div>
       <div className="relative min-h-[280px]">
         <DeckMap layers={layers} onMapReady={setMapRef} />
         <div className="absolute top-3 left-3 bg-surface-raised/95 border border-border rounded-lg p-3 flex gap-3 text-sm">
@@ -151,6 +184,7 @@ export function AnalyticsView() {
       </div>
 
       <aside className="border-t lg:border-t-0 lg:border-l border-border bg-surface-raised overflow-y-auto p-3 space-y-3">
+        <Kpi variant="hero" label="Vehicles in last hour" value={vehiclesLastHour == null ? "—" : vehiclesLastHour.toLocaleString()} />
         <Card>
           <CardHeader title="Camera flow" />
           <div className="p-3 space-y-2">

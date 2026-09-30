@@ -13,6 +13,8 @@ export interface LoginResponse {
   token_type?: string;
   role: Role;
   username: string;
+  last_login_at?: string | null;
+  last_login_ip?: string | null;
 }
 
 export interface Camera {

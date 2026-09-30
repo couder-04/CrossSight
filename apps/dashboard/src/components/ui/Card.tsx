@@ -22,7 +22,7 @@ export function CardHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div className="flex items-center justify-between px-[var(--card-p)] py-[var(--row-py)] border-b border-border">
       <h3 className="text-sm font-semibold tracking-wide uppercase text-slate-200">{title}</h3>
       {action}
     </div>

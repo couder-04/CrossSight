@@ -18,14 +18,18 @@
     "@deck.gl/mesh-layers": "9.0.38",
     "@deck.gl/react": "9.0.38",
     "clsx": "2.1.1",
+    "cmdk": "^1.1.1",
     "date-fns": "4.1.0",
+    "framer-motion": "^13.4.6",
     "h3-js": "4.1.0",
     "jose": "^6.2.12",
+    "lucide-react": "^1.49.0",
     "maplibre-gl": "4.7.1",
     "next": "15.1.6",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "recharts": "2.15.0"
+    "recharts": "2.15.0",
+    "sonner": "^2.0.8"
   },
   "pnpm": {
     "overrides": {

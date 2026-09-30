@@ -5,10 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DeckMap } from "@/components/map/DeckMap";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { CameraStatusDot } from "@/components/ui/CameraStatusDot";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { Kpi } from "@/components/ui/Kpi";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { api } from "@/lib/api";
+import { titleCase } from "@/lib/utils";
 
 async function downloadExport(id: string, filename: string) {
   const res = await fetch(`/api/backend/exports/${id}/download`);
@@ -75,7 +78,18 @@ function Table({ columns, rows }: { columns: string[]; rows: Array<Record<string
           )}
           {rows.map((row, index) => (
             <tr key={index}>
-              {columns.map((column) => <td key={column}>{String(row[column] ?? "—")}</td>)}
+              {columns.map((column) => (
+                <td key={column}>
+                  {column === "state" || column === "status" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <CameraStatusDot status={String(row[column] ?? "").toLowerCase()} />
+                      {String(row[column] ?? "—")}
+                    </span>
+                  ) : (
+                    String(row[column] ?? "—")
+                  )}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -112,9 +126,19 @@ export function HealthPanel() {
         </div>
       </div>
       {error && <p className="text-danger text-sm">{error}</p>}
+      <div className="w-56">
+        <Kpi
+          variant="hero"
+          label="Healthy cameras"
+          value={String(summary.HEALTHY ?? summary.healthy ?? 0)}
+          tone="success"
+        />
+      </div>
       <div className="flex gap-2">
         {Object.entries(summary).map(([state, count]) => (
-          <Badge key={state} tone={state === "HEALTHY" ? "success" : state === "OFFLINE" ? "danger" : "warning"}>{state} {count}</Badge>
+          <Badge key={state} case="normal" tone={state === "HEALTHY" ? "success" : state === "OFFLINE" ? "danger" : "warning"}>
+            {titleCase(state.toLowerCase())} {count}
+          </Badge>
         ))}
       </div>
       <Card>

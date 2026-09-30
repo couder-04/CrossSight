@@ -11,16 +11,20 @@ const tones: Record<string, string> = {
 export function Badge({
   children,
   tone = "default",
+  case: textCase,
   className,
 }: {
   children: React.ReactNode;
   tone?: keyof typeof tones;
+  case?: "upper" | "normal";
   className?: string;
 }) {
+  const letterCase = textCase ?? "upper";
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded px-2 py-0.5 text-xs font-mono uppercase tracking-wide",
+        "inline-flex items-center rounded px-2 py-0.5 text-xs font-mono tracking-wide",
+        letterCase === "normal" ? "normal-case" : "uppercase",
         tones[tone],
         className,
       )}

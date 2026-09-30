@@ -9,6 +9,13 @@ const config: Config = {
           DEFAULT: "hsl(var(--surface))",
           raised: "hsl(var(--surface-raised))",
           overlay: "hsl(var(--surface-overlay))",
+          critical: "hsl(var(--surface-critical))",
+          warning: "hsl(var(--surface-warning))",
+          success: "hsl(var(--surface-success))",
+        },
+        ring: {
+          critical: "hsl(var(--ring-critical))",
+          warning: "hsl(var(--ring-warning))",
         },
         border: "hsl(var(--border))",
         muted: "hsl(var(--muted))",

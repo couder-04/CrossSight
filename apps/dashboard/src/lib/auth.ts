@@ -22,20 +22,48 @@ export function canAccessAdmin(role: Role): boolean {
   return role === "admin";
 }
 
-export function navItemsForRole(role: Role) {
-  const items = [
-    { href: "/live", label: "Live", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/wall", label: "Wall", roles: ["admin", "operator"] as Role[] },
-    { href: "/track", label: "Track", roles: ["admin", "operator"] as Role[] },
-    { href: "/flow", label: "Flow", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/analytics", label: "Analytics", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/alerts", label: "Alerts", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/health", label: "Health", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/review", label: "Review", roles: ["admin", "operator"] as Role[] },
-    { href: "/investigate", label: "Investigate", roles: ["admin", "operator"] as Role[] },
-    { href: "/imports", label: "Import", roles: ["admin", "operator"] as Role[] },
-    { href: "/exports", label: "Export", roles: ["admin", "operator", "analyst"] as Role[] },
-    { href: "/admin", label: "Admin", roles: ["admin"] as Role[] },
+export type NavIconName =
+  | "Radio"
+  | "Grid3x3"
+  | "Route"
+  | "Waypoints"
+  | "Activity"
+  | "Bell"
+  | "HeartPulse"
+  | "ClipboardCheck"
+  | "Search"
+  | "Upload"
+  | "Download"
+  | "Settings";
+
+export interface NavItem {
+  href: string;
+  label: string;
+  icon: NavIconName;
+  roles: Role[];
+}
+
+export const NAV_GROUPS: { id: string; label: string; hrefs: string[] }[] = [
+  { id: "monitor", label: "Monitor", hrefs: ["/live", "/wall", "/alerts", "/health"] },
+  { id: "investigate", label: "Investigate", hrefs: ["/track", "/investigate", "/review"] },
+  { id: "analyze", label: "Analyze", hrefs: ["/flow", "/analytics"] },
+  { id: "manage", label: "Manage", hrefs: ["/imports", "/exports", "/admin"] },
+];
+
+export function navItemsForRole(role: Role): NavItem[] {
+  const items: NavItem[] = [
+    { href: "/live", label: "Live", icon: "Radio", roles: ["admin", "operator", "analyst"] },
+    { href: "/wall", label: "Wall", icon: "Grid3x3", roles: ["admin", "operator"] },
+    { href: "/track", label: "Track", icon: "Route", roles: ["admin", "operator"] },
+    { href: "/flow", label: "Flow", icon: "Waypoints", roles: ["admin", "operator", "analyst"] },
+    { href: "/analytics", label: "Analytics", icon: "Activity", roles: ["admin", "operator", "analyst"] },
+    { href: "/alerts", label: "Alerts", icon: "Bell", roles: ["admin", "operator", "analyst"] },
+    { href: "/health", label: "Health", icon: "HeartPulse", roles: ["admin", "operator", "analyst"] },
+    { href: "/review", label: "Review", icon: "ClipboardCheck", roles: ["admin", "operator"] },
+    { href: "/investigate", label: "Investigate", icon: "Search", roles: ["admin", "operator"] },
+    { href: "/imports", label: "Import", icon: "Upload", roles: ["admin", "operator"] },
+    { href: "/exports", label: "Export", icon: "Download", roles: ["admin", "operator", "analyst"] },
+    { href: "/admin", label: "Admin", icon: "Settings", roles: ["admin"] },
   ];
   return items.filter((item) => item.roles.includes(role));
 }

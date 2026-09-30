@@ -15,6 +15,8 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       username: result.username,
       role: result.role,
+      last_login_at: result.last_login_at ?? null,
+      last_login_ip: result.last_login_ip ?? null,
     });
 
     const options = sessionCookieOptions(60 * 60 * 8);

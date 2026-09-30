@@ -180,8 +180,10 @@ export const api = {
     return request<GeoJSONFeatureCollection>(`/trajectory?${qs}`, { token });
   },
 
-  heatmap(window = "15m", token?: string) {
-    return request<HeatmapResponse>(`/analytics/heatmap?window=${encodeURIComponent(window)}`, { token });
+  heatmap(window = "15m", token?: string, at?: string) {
+    const qs = new URLSearchParams({ window });
+    if (at) qs.set("at", at);
+    return request<HeatmapResponse>(`/analytics/heatmap?${qs}`, { token });
   },
 
   flow(camera_id: string, from: string, to: string, token?: string) {

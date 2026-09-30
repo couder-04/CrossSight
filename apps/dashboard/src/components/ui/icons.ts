@@ -1,0 +1,53 @@
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeftRight,
+  Bell,
+  ClipboardCheck,
+  Clock,
+  Copy,
+  Download,
+  GitBranch,
+  Grid3x3,
+  HeartPulse,
+  MapPinOff,
+  OctagonPause,
+  Radio,
+  Route,
+  Search,
+  Settings,
+  ShieldAlert,
+  Upload,
+  Users,
+  Waypoints,
+  type LucideIcon,
+} from "lucide-react";
+import type { NavIconName } from "@/lib/auth";
+
+/** Named imports so lucide stays tree-shaken. Lookup matches `navItemsForRole` icon names. */
+export const navIcons: Record<NavIconName, LucideIcon> = {
+  Radio,
+  Grid3x3,
+  Route,
+  Waypoints,
+  Activity,
+  Bell,
+  HeartPulse,
+  ClipboardCheck,
+  Search,
+  Upload,
+  Download,
+  Settings,
+};
+
+export const alertTypeIcons: Record<string, LucideIcon> = {
+  watchlist: ShieldAlert,
+  cloned_plate: Copy,
+  convoy: Users,
+  loitering: Clock,
+  geofence: MapPinOff,
+  wrong_way: ArrowLeftRight,
+  route_anomaly: GitBranch,
+  plate_vehicle_mismatch: AlertTriangle,
+  stopped_vehicle: OctagonPause,
+};
