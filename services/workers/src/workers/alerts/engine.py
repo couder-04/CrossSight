@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import signal
@@ -25,6 +26,7 @@ from workers.alerts.rules import (
     GeofenceRule,
     LoiteringRule,
     PlateVehicleMismatchRule,
+    RedisAlertDeduper,
     RouteAnomalyRule,
     Rule,
     StoppedVehicleRule,
@@ -50,12 +52,19 @@ WATCHLIST_REFRESH_SEC = 5
 CONVOY_ZSET_TTL_SEC = 1800
 
 
+async def _is_duplicate(deduper: AlertDeduper | RedisAlertDeduper, alert: Alert, now) -> bool:
+    seen = deduper.is_duplicate(alert, now)
+    if inspect.isawaitable(seen):
+        seen = await seen
+    return bool(seen)
+
+
 class AlertEngine:
     def __init__(
         self,
         rules: Sequence[Rule],
         ctx: DefaultRuleContext,
-        deduper: AlertDeduper | None = None,
+        deduper: AlertDeduper | RedisAlertDeduper | None = None,
     ) -> None:
         self.rules = list(rules)
         self.ctx = ctx
@@ -73,7 +82,7 @@ class AlertEngine:
                 logger.exception("Rule %s failed", rule.name, exc_info=result)
                 continue
             for alert in result:
-                if not self.deduper.is_duplicate(alert, read.ts.replace(tzinfo=None)):
+                if not await _is_duplicate(self.deduper, alert, read.ts.replace(tzinfo=None)):
                     alerts.append(alert)
         return alerts
 
@@ -137,7 +146,14 @@ class AlertsWorker:
             restricted_zones=restricted,
             dwell_overrides=dwell_overrides,
         )
-        self._engine = AlertEngine(build_rules(self.registry), ctx)
+        if self.settings.redis_url and self._redis is not None:
+            deduper: AlertDeduper | RedisAlertDeduper = RedisAlertDeduper(self._redis)
+        else:
+            logger.warning(
+                "Redis unavailable; alert dedupe is in-process and will not span replicas"
+            )
+            deduper = AlertDeduper()
+        self._engine = AlertEngine(build_rules(self.registry), ctx, deduper=deduper)
         self._ctx = ctx
         logger.info(
             "Alerts ready: cameras=%d watchlist=%d sensitive_cams=%d restricted_cams=%d",
@@ -176,7 +192,11 @@ class AlertsWorker:
 
     async def _publish_alert(self, alert: Alert) -> None:
         assert self._producer is not None and self._redis is not None and self._pg_pool
-        if await self._redis_dedupe(alert):
+        assert self._engine is not None
+        # RedisAlertDeduper already claimed the key in process(); a second SET NX
+        # would see that key and drop the alert.
+        already_shared = isinstance(self._engine.deduper, RedisAlertDeduper)
+        if not already_shared and await self._redis_dedupe(alert):
             return
         payload = alert.model_dump_json().encode()
         await self._producer.send_and_wait(self.settings.topic_alerts, payload)

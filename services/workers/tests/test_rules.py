@@ -9,12 +9,14 @@ from anpr_common.schemas import AlertType, Direction, PlateFormat, PlateRead, Ve
 from workers.alerts.engine import AlertsWorker
 from workers.alerts.registry import FileRegistryClient, RegistryRecord
 from workers.alerts.rules import (
+    ALERT_DEDUP_MINUTES,
     AlertDeduper,
     ClonedPlateRule,
     ConvoyRule,
     DefaultRuleContext,
     GeofenceRule,
     PlateVehicleMismatchRule,
+    RedisAlertDeduper,
     RouteAnomalyRule,
     WatchlistRule,
     WrongWayRule,
@@ -239,6 +241,42 @@ def test_alert_deduper_within_10_minutes():
         ts=datetime(2025, 1, 1, 10, 11, tzinfo=UTC),
     )
     assert deduper.is_duplicate(a3, datetime(2025, 1, 1, 10, 11, tzinfo=UTC)) is False
+
+
+class _SharedRedis:
+    """In-memory SET NX EX shared by two alert-worker replicas."""
+
+    def __init__(self) -> None:
+        self.held: set[str] = set()
+        self.calls: list[dict] = []
+
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        self.calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
+        if nx and key in self.held:
+            return 0
+        self.held.add(key)
+        return 1
+
+
+@pytest.mark.asyncio
+async def test_redis_alert_deduper_is_shared_across_replicas():
+    from anpr_common.schemas import Alert, AlertSeverity
+
+    redis = _SharedRedis()
+    left = RedisAlertDeduper(redis)
+    right = RedisAlertDeduper(redis)
+    alert = Alert(
+        type=AlertType.watchlist,
+        severity=AlertSeverity.high,
+        plate_norm="br01ab1234",
+        ts=datetime(2025, 1, 1, 10, 0, tzinfo=UTC),
+    )
+    assert await left.is_duplicate(alert) is False
+    assert await right.is_duplicate(alert) is True
+    assert redis.calls[0]["key"] == "alert:dedup:watchlist:BR01AB1234"
+    assert redis.calls[0]["nx"] is True
+    assert redis.calls[0]["ex"] == ALERT_DEDUP_MINUTES * 60
+    assert redis.calls[1]["ex"] == ALERT_DEDUP_MINUTES * 60
 
 
 class _ConvoyRedis:

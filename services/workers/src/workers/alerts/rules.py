@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-import json
 from typing import Any, Protocol
 
 from anpr_common.fuzzy import candidates
@@ -457,6 +458,26 @@ class AlertDeduper:
         cutoff = now - timedelta(minutes=ALERT_DEDUP_MINUTES)
         self._recent = {k: v for k, v in self._recent.items() if v >= cutoff}
         return False
+
+
+class RedisAlertDeduper:
+    """Deduplicate alerts across workers with Redis ``SET key value NX EX``."""
+
+    def __init__(self, redis: Any) -> None:
+        self._redis = redis
+
+    async def is_duplicate(self, alert: Alert, now: datetime | None = None) -> bool:
+        """Return True when this (type, plate) was already claimed inside the window.
+
+        ``now`` matches ``AlertDeduper``; Redis applies the TTL from the server clock.
+        SET NX returns 0 when the key exists. redis-py returns None for that same case.
+        """
+        del now
+        key = f"alert:dedup:{alert.type.value}:{alert.plate_norm.upper()}"
+        result = self._redis.set(key, "1", nx=True, ex=ALERT_DEDUP_MINUTES * 60)
+        if inspect.isawaitable(result):
+            result = await result
+        return result == 0 or result is None
 
 
 class DefaultRuleContext:
