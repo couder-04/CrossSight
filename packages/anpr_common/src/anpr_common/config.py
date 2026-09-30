@@ -78,12 +78,19 @@ class Settings(BaseSettings):
         alias="PLATEOCR_DETECTOR",
     )
     plateocr_ocr_model: str = Field(
-        default="india-v1",
+        default="india-v1.1",
         alias="PLATEOCR_OCR_MODEL",
     )
     plateocr_device: str = Field(default="auto", alias="PLATEOCR_DEVICE")
     plateocr_det_conf: float = Field(default=0.4, alias="PLATEOCR_DET_CONF")
-    plateocr_min_ocr_conf: float = Field(default=0.0, alias="PLATEOCR_MIN_OCR_CONF")
+    plateocr_min_ocr_conf: float = Field(
+        default=0.5,
+        alias="PLATEOCR_MIN_OCR_CONF",
+        description=(
+            "Drop per-frame plate reads below this mean character confidence. Garbage reads "
+            "(no plate, whole photo OCR'd) score ~0.05-0.2; clear plates score 0.9+."
+        ),
+    )
     plateocr_ocr_config: str = Field(default="", alias="PLATEOCR_OCR_CONFIG")
     plateocr_plate_format: str = Field(
         default="india",
@@ -91,14 +98,28 @@ class Settings(BaseSettings):
         description="india | none | empty (auto from model). India fine-tune defaults to india.",
     )
     plateocr_tta: bool = Field(
-        default=True,
+        default=False,
         alias="PLATEOCR_TTA",
-        description="Average OCR slot probs over CLAHE/pad/scale views before India decode.",
+        description=(
+            "Average OCR slot probs over CLAHE/pad/scale views before India decode. ~7x OCR "
+            "cost for +1 pt on in_crops (within noise); off for real-time video."
+        ),
     )
     plateocr_bbox_pad: bool = Field(
-        default=True,
+        default=False,
         alias="PLATEOCR_BBOX_PAD",
-        description="Try padded/shrunk detector crops and keep the best OCR read.",
+        description="Try padded/shrunk detector crops and keep the best OCR read (~4x OCR cost).",
+    )
+    ocr_frame_stride: int = Field(
+        default=1,
+        ge=1,
+        alias="OCR_FRAME_STRIDE",
+        description="Process every Nth video frame (use 2-3 on CPU-only hosts).",
+    )
+    watchlist_min_conf: float = Field(
+        default=0.5,
+        alias="WATCHLIST_MIN_CONF",
+        description="Reads below this fused confidence never raise watchlist alerts.",
     )
     registry_path: str = Field(default="", alias="REGISTRY_PATH")
     route_anomaly_min_cameras: int = Field(default=3, alias="ROUTE_ANOMALY_MIN_CAMERAS")

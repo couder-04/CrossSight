@@ -124,12 +124,14 @@ services:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"  # in-network port; .env 5433 is the host mapping
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # The API image has no curl, and the route is /healthz (not /health).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=4)"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -158,6 +160,7 @@ services:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"  # in-network port; .env 5433 is the host mapping
       REDIS_URL: redis://redis:6379/0
     depends_on:
       redpanda-init:
@@ -181,6 +184,7 @@ services:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"  # in-network port; .env 5433 is the host mapping
       REDIS_URL: redis://redis:6379/0
       HEALTH_PORT: "8081"
     healthcheck:
@@ -211,6 +215,7 @@ services:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"  # in-network port; .env 5433 is the host mapping
       REDIS_URL: redis://redis:6379/0
       HEALTH_PORT: "8082"
     healthcheck:
@@ -242,6 +247,7 @@ services:
       KAFKA_BOOTSTRAP: redpanda:9092
       CLICKHOUSE_HOST: clickhouse
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"  # in-network port; .env 5433 is the host mapping
       REDIS_URL: redis://redis:6379/0
       HEALTH_PORT: "8083"
       ALERTS_GROUP_ID: anpr-alerts
@@ -287,6 +293,7 @@ services:
       MINIO_ENDPOINT: minio:9000
     volumes:
       - ./models:/models:ro
+      - ocr_model_cache:/root/.cache
     depends_on:
       redpanda:
         condition: service_healthy
@@ -306,11 +313,13 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ./models:/models:ro
+      - ocr_model_cache:/root/.cache
     depends_on:
       redpanda:
         condition: service_healthy
 
 volumes:
+  ocr_model_cache:  # detector + OCR weights, downloaded once
   clickhouse_data:
   postgres_data:
   minio_data:

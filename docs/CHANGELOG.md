@@ -1,5 +1,16 @@
 # Changelog
 
+- fix: image/video uploads run the plate detector; OCR on a whole photo returned invented plates (blank image -> `DD0999`).
+- fix: one `PlateRead` per vehicle; a single missed detection no longer splits a track into two events.
+- fix: frame fusion picks the most-supported text and ignores inserted characters (was `MH12AAB1234` at 100%).
+- fix: `PlateRead.ts` is the frame capture time, not the emit time; evidence crops are the raw camera crop.
+- fix: watchlist alerts ignore reads below `WATCHLIST_MIN_CONF` (0.5); per-frame reads below `PLATEOCR_MIN_OCR_CONF` (now 0.5) are dropped.
+- perf: `PLATEOCR_TTA` / `PLATEOCR_BBOX_PAD` are now honoured and default off; enhanced re-read only for weak reads (4-plate frame 854 -> 51 ms on GPU).
+- feat: default OCR model `india-v1.1` (same predictions as `india-v1`, ~2x faster on CPU).
+- feat: `ocr-engine run --stride`, `--start-time`, `--annotate-out`.
+- fix(docker): OCR images expand `OCR_SOURCE`; the GPU image really uses onnxruntime-gpu; models cached in the `ocr_model_cache` volume.
+- fix(infra): `make app-up` on a fresh checkout: aiofiles in the API image, in-network `POSTGRES_PORT`, LF shell scripts, working API healthcheck.
+- docs: drop the invalid `in_synth_kaggle` evaluation (it scored india-v1 on its own training set).
 - fix: OD `unique_vehicles` is counted with `uniqExact(plate_norm)` and cells below `OD_K_ANON` are suppressed.
 - fix: alert dedupe uses Redis `SET NX EX` when `REDIS_URL` is set so replicas share one window.
 - fix: a widened trajectory search writes a second audit row and sets `data_status`.

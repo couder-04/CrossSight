@@ -305,5 +305,7 @@
       ],
       "failure_count": 276
     }
-  ]
+  ],
+  "invalid": true,
+  "invalid_reason": "in_synth_kaggle_* removed: it scored india-v1 on the abtexp synthetic set it was trained on. All 273 plates of <=10 chars were training images (271 read correctly); all 127 plates of 11 chars cannot be emitted by the 10-slot model (0 correct). The number and the per-state table measured the share of 11-char plates per state, not accuracy. in_crops is the valid held-out Indian test set."
 }

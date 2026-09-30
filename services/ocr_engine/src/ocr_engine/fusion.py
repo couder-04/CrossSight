@@ -61,15 +61,27 @@ def _align_to_reference(ref: str, other: str) -> list[tuple[str | None, str | No
     return pairs_rev
 
 
+def _read_weight(read: FrameRead) -> float:
+    """Mean char confidence x quality. A mean, not a sum, so longer strings don't win by length."""
+    if not read.text:
+        return 0.0
+    probs = read.char_probs or [0.5]
+    return (sum(probs) / len(probs)) * read.quality
+
+
 def _pick_reference(reads: Sequence[FrameRead]) -> str:
-    if not reads:
+    """Pick the plate string with the most support across frames.
+
+    Identical reads are grouped and their weights summed, so the reference is the text the track
+    agrees on most, not the single read with the highest total confidence.
+    """
+    support: dict[str, float] = {}
+    for read in reads:
+        if read.text:
+            support[read.text] = support.get(read.text, 0.0) + _read_weight(read)
+    if not support:
         return ""
-    scored = sorted(
-        reads,
-        key=lambda r: (sum(r.char_probs) * r.quality, len(r.text)),
-        reverse=True,
-    )
-    return scored[0].text
+    return max(support.items(), key=lambda kv: kv[1])[0]
 
 
 def fuse_track_reads(reads: Sequence[FrameRead], top_k: int = 3) -> FusionResult:
@@ -103,12 +115,9 @@ def fuse_track_reads(reads: Sequence[FrameRead], top_k: int = 3) -> FusionResult
                 votes[ch] = votes.get(ch, 0.0) + weight
                 ref_pos += 1
             elif other_ch is not None:
-                prob = read.char_probs[prob_idx] if prob_idx < len(read.char_probs) else 0.5
-                weight = prob * read.quality
-                votes = position_votes.setdefault(ref_pos, {})
-                votes[other_ch] = votes.get(other_ch, 0.0) + weight
+                # Extra character with no reference position: skip it. Voting it into
+                # ``ref_pos`` and advancing shifted every later vote of this read by one.
                 prob_idx += 1
-                ref_pos += 1
 
     chars: list[str] = []
     char_conf: list[float] = []

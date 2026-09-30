@@ -15,6 +15,7 @@ import logging
 import os
 import statistics
 import sys
+import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,21 +30,22 @@ from ocr_engine.recognize import RecognitionResult, Recognizer
 logger = logging.getLogger(__name__)
 
 DEFAULT_DETECTOR = "yolo-v9-s-608-license-plate-end2end"
-DEFAULT_OCR = "india-v1"
+DEFAULT_OCR = "india-v1.1"
 
-# Inference-only accuracy levers (no retrain / no new labels). Override via env.
-_TTA_DEFAULT = os.environ.get("PLATEOCR_TTA", "1").strip().lower() not in (
-    "0",
-    "false",
-    "off",
-    "no",
-)
-_BBOX_PAD_DEFAULT = os.environ.get("PLATEOCR_BBOX_PAD", "1").strip().lower() not in (
-    "0",
-    "false",
-    "off",
-    "no",
-)
+
+# Inference-only accuracy levers (no retrain / no new labels). Both are OFF by default: on the
+# in_crops benchmark TTA gained +1.0 pt (within the +/-2.2 pt noise) for ~7x OCR latency, and
+# together with bbox padding they cut a 4-plate frame from ~8.5 to ~1.2 fps on an RTX 4060.
+# Enable per reader (Settings.plateocr_tta / plateocr_bbox_pad) or via env for offline eval.
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "off", "no", "")
+
+
+_TTA_DEFAULT = _env_flag("PLATEOCR_TTA", False)
+_BBOX_PAD_DEFAULT = _env_flag("PLATEOCR_BBOX_PAD", False)
 
 RELEASES_URL = "https://github.com/Ajitesh-07/PlateOCR/releases/download"
 CUSTOM_OCR_MODELS: dict[str, dict[str, Any]] = {
@@ -59,6 +61,20 @@ CUSTOM_OCR_MODELS: dict[str, dict[str, Any]] = {
         ),
         "plate_format": "india",
     },
+    # Same weights and predictions as india-v1; Einsum ops rewritten as MatMul
+    # (PlateOCR finetune/onnx_matmul.py): ~2x faster on CPU and steadier on GPU.
+    "india-v1.1": {
+        "tag": "india-ocr-v1.1",
+        "onnx": (
+            "india_ocr_v1_1.onnx",
+            "88731e2db53ef7df9be26c710378cb6e0e9bc29fd5c59c9602cbfe0db4806ad4",
+        ),
+        "config": (
+            "india_ocr_v1_1_plate_config.yaml",
+            "3f4718541abd7ba9e7fc050cfbda7463b64b9795d8c99689019c5b58a8e65b41",
+        ),
+        "plate_format": "india",
+    },
 }
 
 PLATEOCR_HELP = """
@@ -70,7 +86,7 @@ Install (CPU):
 On first run, detector + OCR ONNX weights download to:
   ~/.cache/open-image-models/          (YOLOv9 detector)
   ~/.cache/fast-plate-ocr/             (global CCT models)
-  ~/.cache/plate-ocr/india-v1/         (India fine-tune, ~5 MB)
+  ~/.cache/plate-ocr/india-v1.1/       (India fine-tune, ~5 MB)
 """
 
 
@@ -101,25 +117,36 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+_FETCH_LOCK = threading.Lock()
+
+
 def fetch_custom_model(name: str) -> tuple[Path, Path]:
-    """Return local (onnx, plate_config) paths for a CUSTOM_OCR_MODELS entry."""
+    """Return local (onnx, plate_config) paths for a CUSTOM_OCR_MODELS entry.
+
+    Safe to call concurrently (fleet mode starts one reader per camera thread): downloads are
+    serialised in-process, each writer uses its own temp file, and the verified file is moved
+    into place atomically, so a reader never sees a partial model.
+    """
     spec = CUSTOM_OCR_MODELS[name]
     cache = Path(os.environ.get("PLATE_OCR_CACHE", Path.home() / ".cache" / "plate-ocr")) / name
     base = os.environ.get("PLATE_OCR_MODEL_URL", RELEASES_URL).rstrip("/")
     cache.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
-    for fname, sha in (spec["onnx"], spec["config"]):
-        dest = cache / fname
-        if not (dest.exists() and _sha256(dest) == sha):
-            url = f"{base}/{spec['tag']}/{fname}"
-            logger.info("Downloading %s", url)
-            tmp = dest.with_suffix(dest.suffix + ".part")
-            urllib.request.urlretrieve(url, tmp)
-            if _sha256(tmp) != sha:
-                tmp.unlink(missing_ok=True)
-                raise RuntimeError(f"Checksum mismatch for {url}; refusing to use it")
-            tmp.replace(dest)
-        paths.append(dest)
+    with _FETCH_LOCK:
+        for fname, sha in (spec["onnx"], spec["config"]):
+            dest = cache / fname
+            if not (dest.exists() and _sha256(dest) == sha):
+                url = f"{base}/{spec['tag']}/{fname}"
+                logger.info("Downloading %s", url)
+                tmp = dest.with_name(f"{dest.name}.{os.getpid()}.{threading.get_ident()}.part")
+                try:
+                    urllib.request.urlretrieve(url, tmp)
+                    if _sha256(tmp) != sha:
+                        raise RuntimeError(f"Checksum mismatch for {url}; refusing to use it")
+                    os.replace(tmp, dest)
+                finally:
+                    tmp.unlink(missing_ok=True)
+            paths.append(dest)
     return paths[0], paths[1]
 
 
@@ -224,6 +251,8 @@ class PlateOCRReader:
         min_ocr_conf: float = 0.0,
         ocr_config: str | None = None,
         plate_format: str | None = None,
+        tta: bool | None = None,
+        bbox_pad: bool | None = None,
     ) -> None:
         try:
             import onnxruntime as ort
@@ -248,8 +277,8 @@ class PlateOCRReader:
 
         self.min_ocr_conf = min_ocr_conf
         self.plate_format = plate_format
-        self.tta = _TTA_DEFAULT
-        self.bbox_pad = _BBOX_PAD_DEFAULT
+        self.tta = _TTA_DEFAULT if tta is None else tta
+        self.bbox_pad = _BBOX_PAD_DEFAULT if bbox_pad is None else bbox_pad
         providers = _pick_providers(device)
         self._alpr = self._build(ALPR, detector_model, ocr_model, ocr_config, det_conf, providers)
         try:
@@ -388,34 +417,29 @@ class PlateOCRReader:
 
 
 class PlateOCRRecognizer(Recognizer):
-    """Recognizer adapter: runs full ALPR on a crop (or whole image)."""
+    """Recognizer adapter for **plate crops** (eval fixtures, legacy rectified plates).
+
+    ``recognize`` runs OCR only and assumes the input is already a cropped plate. For full
+    frames or photos use ``read_scene`` (detector + OCR). There is deliberately no automatic
+    fallback between the two: with ``plate_format="india"`` the decoder always returns some
+    valid-looking plate, so OCR on a whole photo "succeeds" with an invented plate and a
+    crop-first fallback would never reach the detector.
+    """
 
     def __init__(self, reader: PlateOCRReader | None = None, **kwargs: Any) -> None:
         self._reader = reader or PlateOCRReader(**kwargs)
 
     def recognize(self, image: np.ndarray) -> RecognitionResult:
-        # Prefer OCR-only on crops (eval fixtures / enhanced plates).
         text, conf, probs = self._reader.read_crop(image)
-        if text:
-            if len(probs) < len(text):
-                probs = probs + [conf] * (len(text) - len(probs))
-            return RecognitionResult(
-                text=text,
-                char_probs=probs[: len(text)],
-                confidence=conf,
-            )
-        hits = self._reader.read(image)
-        if not hits:
+        if not text:
             return RecognitionResult(text="UNKNOWN", char_probs=[], confidence=0.0)
-        best = max(hits, key=lambda h: h.ocr_confidence)
-        probs = best.char_probs or [best.ocr_confidence] * max(1, len(best.text))
-        if len(probs) < len(best.text):
-            probs = probs + [best.ocr_confidence] * (len(best.text) - len(probs))
-        return RecognitionResult(
-            text=best.text,
-            char_probs=probs[: len(best.text)],
-            confidence=best.ocr_confidence,
-        )
+        if len(probs) < len(text):
+            probs = probs + [conf] * (len(text) - len(probs))
+        return RecognitionResult(text=text, char_probs=probs[: len(text)], confidence=conf)
+
+    def read_scene(self, image: np.ndarray) -> list[PlateHit]:
+        """Detect and read every plate in a full frame/photo."""
+        return self._reader.read(image)
 
     def recognize_path(self, image_path: str | Path) -> RecognitionResult:
         import cv2

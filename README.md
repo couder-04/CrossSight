@@ -79,7 +79,7 @@ Full tables: [`reports/ocr_benchmark.md`](reports/ocr_benchmark.md) · reproduce
 **Notes (measured, not marketing):**
 
 - The **>90%** claim is validated on OpenALPR (real cars, EU/Brazil/US). EU **92.6%**, Brazil **98.2%**, US **87.8%**.
-- For **Indian** plates, default is `india-v1` + TTA (**74.0%** exact on 1,684 crops). Still **not** a >90% India claim. `PLATEOCR_TTA=0` → **73.0%** at ~33 ms/crop.
+- For **Indian** plates, default is `india-v1.1` + Indian format decoding, TTA off (**73.0%** exact on 1,684 crops). TTA adds +1.0 pt (within the ±2.2 pt margin) for ~7x OCR latency, so it is off by default (`PLATEOCR_TTA=1` to enable). Still **not** a >90% India claim.
 - Multi-lane / night / rain **Indian gantry** >90% is **not** claimed (no labelled set).
 
 ## Quickstart
@@ -147,10 +147,11 @@ Use `UV_PROJECT_ENVIRONMENT=.venv311` if the default `.venv` is locked on your m
 
 ## Supplying model weights
 
-**Default (`OCR_BACKEND=plateocr`):** uses PlateOCR's **`india-v1`** fine-tune + Indian format decoding. On first run weights download to:
+**Default (`OCR_BACKEND=plateocr`):** uses PlateOCR's **`india-v1.1`** fine-tune + Indian format decoding. `india-v1.1` is `india-v1` with its ONNX `Einsum` ops rewritten as `MatMul`: identical predictions, ~2x faster on CPU. On first run weights download to:
 
 - `~/.cache/open-image-models/yolo-v9-s-608-license-plate-end2end/` (detector, ~28 MB)
-- `~/.cache/plate-ocr/india-v1/` (India OCR ONNX + config, ~5 MB, SHA-256 verified)
+- `~/.cache/plate-ocr/india-v1.1/` (India OCR ONNX + config, ~5 MB, SHA-256 verified)
+- In Docker these live in the `ocr_model_cache` volume (`/root/.cache`), so they download once.
 - Optional global OCR: set `PLATEOCR_OCR_MODEL=cct-s-v2-global-model` → `~/.cache/fast-plate-ocr/`
 
 Upstream reference vendored under `vendor/PlateOCR` from [Ajitesh-07/PlateOCR](https://github.com/Ajitesh-07/PlateOCR) (india-v1, `plate_format.py`, finetune/). See `vendor/PlateOCR/MODEL_CARD.md`.
@@ -187,10 +188,16 @@ uv run python -m ocr_engine.train.synth_plates --out data/synth --count 5000
 ### Running OCR on your own clips
 
 ```bash
-# PlateOCR (default = india-v1 + Indian format decode)
+# PlateOCR (default = india-v1.1 + Indian format decode)
 uv run python -m ocr_engine.cli image --source vendor/PlateOCR/samples/test_image.png --dry-run
 uv run python -m ocr_engine.cli run --source /path/to/clip.mp4 --camera-id cam-001 --dry-run
-uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --ocr-model india-v1 --plate-format india
+uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --ocr-model india-v1.1 --plate-format india
+
+# Annotated output video + real capture timestamps (file recorded at 09:00 UTC)
+uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --dry-run \n  --annotate-out out.mp4 --start-time 2026-09-30T09:00:00
+
+# CPU-only host: process every 3rd frame
+uv run python -m ocr_engine.cli run --source rtsp://cam/stream --camera-id cam-001 --stride 3
 
 # Global multi-region OCR (non-Indian)
 uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --ocr-model cct-s-v2-global-model --plate-format none
@@ -204,7 +211,25 @@ uv run python -m ocr_engine.cli run --source /path/to/clip.mp4 --camera-id cam-0
 
 Without `--dry-run`, events publish to Kafka + MinIO. The rest of the platform (simulator path) is unaffected.
 
-GPU profile: `docker compose --profile gpu up ocr-engine-gpu` (NVIDIA runtime). Jetson (TensorRT via ultralytics export) and Hailo are deployment notes only — not bundled.
+What the video pipeline emits:
+
+- **One `PlateRead` per vehicle.** A track ends only when ByteTrack drops it (plate unseen for 45 processed frames), so a vehicle's event appears ~1.5 s after it leaves the frame at 30 fps. The live preview (`frames` channel) is real time.
+- **`ts` is the capture time** of the last frame the plate was seen in: wall clock for RTSP, `--start-time` (default: now) + frame offset for files.
+- **The evidence crop** (`crop_key`) is the unmodified camera crop.
+
+OCR tuning (env / `.env`):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PLATEOCR_OCR_MODEL` | `india-v1.1` | `india-v1.1`, `india-v1`, `cct-s-v2-global-model` (non-Indian), or a `.onnx` path |
+| `PLATEOCR_MIN_OCR_CONF` | `0.5` | Drop per-frame reads below this confidence (garbage scores ~0.05-0.2) |
+| `PLATEOCR_TTA` / `PLATEOCR_BBOX_PAD` | `0` / `0` | Accuracy extras; ~7x / ~4x OCR cost. Leave off for live video |
+| `OCR_FRAME_STRIDE` | `1` | Process every Nth frame (2-3 on CPU-only hosts) |
+| `WATCHLIST_MIN_CONF` | `0.5` | Reads below this never raise watchlist alerts |
+
+Speed (RTX 4060 laptop, full pipeline, 720p-1080p): ~29-35 ms/frame, faster than real time. CPU is ~1 s/frame (dominated by the YOLOv9 detector): use a GPU for live cameras.
+
+GPU profile: `docker compose --profile gpu up ocr-engine-gpu` (NVIDIA runtime; the image ships CUDA 13 + cuDNN 9 via pip, so the host driver must support CUDA 13). Set `OCR_SOURCE` (file path or RTSP URL) and `OCR_CAMERA_ID`. Jetson (TensorRT via ultralytics export) and Hailo are deployment notes only — not bundled.
 
 ## Evaluation methodology
 
