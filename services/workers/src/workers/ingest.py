@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import orjson
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, TopicPartition
+from aiokafka.structs import OffsetAndMetadata
 from anpr_common.config import Settings, get_settings
 from anpr_common.geo import enrich_h3
 from anpr_common.schemas import PlateRead
@@ -73,6 +74,8 @@ class IngestWorker:
         self._stop = asyncio.Event()
         self._buffer: list[dict[str, Any]] = []
         self._heatmap_buffer: dict[tuple[int, datetime], int] = {}
+        # Next offset to commit per (topic, partition). Advanced only as reads are buffered.
+        self._pending_offsets: dict[tuple[str, int], int] = {}
         self._cameras: dict[str, Any] = {}
         self._redis = None
         self._ch: ClickHouseClient | None = None
@@ -84,25 +87,57 @@ class IngestWorker:
         self._cameras = await load_cameras(self._pg_pool)
         logger.info("Loaded %d cameras for H3 enrichment", len(self._cameras))
 
+    def _track_offset(self, topic: str, partition: int, offset: int) -> None:
+        """Record the highest next-offset for a partition as its read is buffered."""
+        key = (topic, partition)
+        next_offset = offset + 1
+        current = self._pending_offsets.get(key)
+        if current is None or next_offset > current:
+            self._pending_offsets[key] = next_offset
+
+    async def _commit_offsets(self) -> None:
+        if self._consumer is None or not self._pending_offsets:
+            return
+        offsets = {
+            TopicPartition(topic, partition): OffsetAndMetadata(next_offset, "")
+            for (topic, partition), next_offset in self._pending_offsets.items()
+        }
+        await self._consumer.commit(offsets)
+        self._pending_offsets.clear()
+
     async def _flush_buffer(self) -> None:
         if self._ch is None:
             return
+        reads_batch: list[dict[str, Any]] | None = None
+        heatmap_snapshot: dict[tuple[int, datetime], int] | None = None
         if self._buffer:
-            batch = self._buffer
+            reads_batch = self._buffer
             self._buffer = []
-            await self._ch.insert_reads_async(batch)
-            logger.debug("Inserted %d reads into ClickHouse", len(batch))
         if self._heatmap_buffer:
-            rows = [
-                {
-                    "h3_cell": h3_cell,
-                    "minute": minute.replace(tzinfo=None) if minute.tzinfo else minute,
-                    "count": count,
-                }
-                for (h3_cell, minute), count in self._heatmap_buffer.items()
-            ]
+            heatmap_snapshot = self._heatmap_buffer
             self._heatmap_buffer = {}
-            await self._ch.insert_heatmap_1min_async(rows)
+        try:
+            if reads_batch:
+                await self._ch.insert_reads_async(reads_batch)
+                logger.debug("Inserted %d reads into ClickHouse", len(reads_batch))
+            if heatmap_snapshot:
+                rows = [
+                    {
+                        "h3_cell": h3_cell,
+                        "minute": minute.replace(tzinfo=None) if minute.tzinfo else minute,
+                        "count": count,
+                    }
+                    for (h3_cell, minute), count in heatmap_snapshot.items()
+                ]
+                await self._ch.insert_heatmap_1min_async(rows)
+        except Exception:
+            if reads_batch:
+                self._buffer = reads_batch + self._buffer
+            if heatmap_snapshot:
+                for key, count in heatmap_snapshot.items():
+                    self._heatmap_buffer[key] = self._heatmap_buffer.get(key, 0) + count
+            raise
+        await self._commit_offsets()
 
     async def _handle_read(self, read: PlateRead) -> None:
         assert self._dedup is not None
@@ -181,7 +216,10 @@ class IngestWorker:
             read = _parse_read(msg.value)
             if read is None:
                 continue
+            buffered_before = len(self._buffer)
             await self._handle_read(read)
+            if len(self._buffer) > buffered_before:
+                self._track_offset(msg.topic, msg.partition, msg.offset)
             if len(self._buffer) >= BATCH_MAX_ROWS:
                 await self._flush_buffer()
 
@@ -200,7 +238,7 @@ class IngestWorker:
             self.settings.topic_reads,
             bootstrap_servers=self.settings.kafka_bootstrap,
             group_id="anpr-ingest",
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             auto_offset_reset="latest",
         )
         await self._consumer.start()
@@ -222,7 +260,12 @@ class IngestWorker:
                 await batch_task
             except asyncio.CancelledError:
                 pass
-            await self._flush_buffer()
+            try:
+                await self._flush_buffer()
+            except Exception:
+                logger.exception("Shutdown flush failed; offsets left uncommitted")
+            else:
+                await self._commit_offsets()
             if self._consumer:
                 await self._consumer.stop()
             if self._pg_pool:
