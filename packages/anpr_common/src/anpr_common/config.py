@@ -120,6 +120,7 @@ class Settings(BaseSettings):
 
     publish_annotated_frames: bool = Field(default=True, alias="PUBLISH_ANNOTATED_FRAMES")
 
+    stale_job_minutes: int = Field(default=30, alias="STALE_JOB_MINUTES")
     max_upload_video_bytes: int = Field(default=512 * 1024 * 1024, alias="MAX_UPLOAD_VIDEO_BYTES")
     max_upload_image_bytes: int = Field(default=15 * 1024 * 1024, alias="MAX_UPLOAD_IMAGE_BYTES")
     max_upload_table_bytes: int = Field(default=10 * 1024 * 1024, alias="MAX_UPLOAD_TABLE_BYTES")

@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import get_session_factory
+from api.jobs import apply_stale_job_recovery
 from api.migrate import apply_postgres_upgrade
 from api.routes import (
     alerts,
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
     factory = get_session_factory(settings)
     async with factory() as session:
         await apply_postgres_upgrade(session)
+        await apply_stale_job_recovery(session, stale_minutes=settings.stale_job_minutes)
         await ensure_seed_users(session, settings)
     logger.info("API started; seed users ensured")
     yield

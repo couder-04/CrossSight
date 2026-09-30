@@ -29,6 +29,7 @@ from shapely.geometry import shape
 from sqlalchemy import select
 
 from api.auditutil import audit_row
+from api.jobs import FAILED, requeue
 from api.db import (
     AlertRow,
     Camera,
@@ -569,6 +570,45 @@ async def _run_export(export_id: UUID, role: str) -> None:
             row.status = "failed"
             row.error = str(exc)[:500]
         await session.commit()
+
+
+@router.post("/uploads/{upload_id}/retry")
+async def retry_upload(
+    upload_id: UUID,
+    background: BackgroundTasks,
+    session: SessionDep,
+    _user: UserDep,
+) -> dict[str, Any]:
+    row = await session.get(UploadRow, upload_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if row.status != FAILED:
+        raise HTTPException(status_code=409, detail="Only a failed upload can be retried")
+    requeue(row)
+    await session.commit()
+    background.add_task(_process_media, row.id)
+    await session.refresh(row)
+    return _upload_out(row)
+
+
+@router.post("/exports/{export_id}/retry")
+async def retry_export(
+    export_id: UUID,
+    background: BackgroundTasks,
+    session: SessionDep,
+    user: UserDep,
+) -> dict[str, Any]:
+    row = await session.get(ExportRow, export_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Export not found")
+    if row.status != FAILED:
+        raise HTTPException(status_code=409, detail="Only a failed export can be retried")
+    _forbid(user.role.value, export_action(row.kind))
+    requeue(row)
+    await session.commit()
+    background.add_task(_run_export, row.id, user.role.value)
+    await session.refresh(row)
+    return _export_out(row)
 
 
 async def _collect(session, ch, settings, kind: str, filters: dict, role: str):

@@ -39,3 +39,9 @@
 - [x] e2e tests (RUN_INTEGRATION=1)
 - [x] README + PLAN
 - [x] Definition of Done verified on this machine
+
+## Deferred: durable jobs (P1-2 step B)
+
+Export and media jobs still run in the API process via FastAPI `BackgroundTasks`. Startup recovery marks rows left in `processing` longer than `STALE_JOB_MINUTES` as `failed` with `error=worker_lost`, and `POST /exports/{id}/retry` plus `POST /uploads/{id}/retry` put them back to `queued`.
+
+Not in this change: publish job intents to a `jobs.v1` Kafka topic consumed by a new `workers-jobs` service, so a restart does not depend on the API process staying up.
