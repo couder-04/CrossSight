@@ -241,6 +241,18 @@ Default harness uses `MockRecognizer` on the bundled synthetic fixture so CI doe
 
 
 
+## Future scope
+
+Roadmap after the running MVP (simulated city, measured OCR, control-room dashboard).
+
+1. **City-scale real-time CCTV integration.** Extend CrossSight from simulated and uploaded feeds to continuous RTSP/IP camera streams, so real-time ANPR, vehicle tracking, and cross-camera intelligence cover an entire city.
+2. **Advanced Indian ANPR optimization.** Build and curate a diverse Indian license-plate dataset covering night, rain, highways, gantries, and hard urban conditions, then fine-tune the model for real-world accuracy.
+3. **Durable and scalable job processing.** Add a dedicated Kafka-based job layer for reliable background processing, automatic retries, failure recovery, and large asynchronous workloads.
+4. **Horizontal city-scale architecture.** Move the processing layer to distributed Rust/Flink stream processing so CrossSight can grow from hundreds to thousands of cameras and support multi-city deployments.
+5. **Privacy and regulatory compliance.** Add a privacy-by-design layer aligned with India’s DPDP Act: data retention policies, purpose-based access, privacy-preserving storage, and data-subject workflows.
+6. **Evidence-grade investigation and auditability.** Strengthen the evidence pipeline with cryptographic hashing, tamper-evident audit logs, immutable evidence records, and standardized exports for formal investigations.
+7. **Multi-tenant and government deployment.** Support multi-city, multi-agency, and multi-tenant operation so separate police departments, municipal bodies, and control rooms can deploy on one platform.
+
 ## Scaling notes
 
 - Replace Python consumers with **Flink** or **Rust** for higher ingest rates; keep the same Kafka schemas
