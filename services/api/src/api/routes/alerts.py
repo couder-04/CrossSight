@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from api.auditutil import audit_row
 from api.db import AlertReviewRow, AlertRow
-from api.deps import MinioDep, OperatorUserDep, SessionDep, SettingsDep, UserDep
+from api.deps import MinioPresignDep, OperatorUserDep, SessionDep, SettingsDep, UserDep
 from api.schemas import AlertActionBody, AlertOut, DispatchBody, ReviewBody
 from api.video_feeds import camera_in_source, normalize_source
 
@@ -98,7 +98,7 @@ async def get_alert(
     alert_id: UUID,
     session: SessionDep,
     settings: SettingsDep,
-    minio: MinioDep,
+    minio: MinioPresignDep,
     _user: UserDep,
 ) -> AlertOut:
     row = await session.get(AlertRow, alert_id)
