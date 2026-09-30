@@ -6,12 +6,15 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_JWT_SECRET = "change-me-demo-jwt-secret-anpr-platform"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     city_query: str | None = Field(default="Pune, India", alias="CITY_QUERY")
@@ -25,6 +28,7 @@ class Settings(BaseSettings):
     h3_heatmap_res: int = Field(default=8, alias="H3_HEATMAP_RES")
     h3_od_res: int = Field(default=7, alias="H3_OD_RES")
     sim_speed: float = Field(default=60.0, alias="SIM_SPEED")
+    app_env: Literal["dev", "staging", "prod"] = Field(default="dev", alias="APP_ENV")
 
     kafka_bootstrap: str = Field(default="localhost:19092", alias="KAFKA_BOOTSTRAP")
     topic_reads: str = Field(default="anpr.reads.v1", alias="TOPIC_READS")
@@ -51,7 +55,7 @@ class Settings(BaseSettings):
     minio_bucket: str = Field(default="anpr-crops", alias="MINIO_BUCKET")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
 
-    jwt_secret: str = Field(default="change-me-demo-jwt-secret-anpr-platform", alias="JWT_SECRET")
+    jwt_secret: str = Field(default=DEFAULT_JWT_SECRET, alias="JWT_SECRET")
     jwt_expire_minutes: int = Field(default=480, alias="JWT_EXPIRE_MINUTES")
     seed_admin_user: str = Field(default="admin", alias="SEED_ADMIN_USER")
     seed_admin_pass: str = Field(default="admin123", alias="SEED_ADMIN_PASS")

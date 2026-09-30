@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from anpr_common.config import get_settings
+from anpr_common.config import DEFAULT_JWT_SECRET, Settings, get_settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,9 +31,29 @@ from api.seed import ensure_seed_users
 logger = logging.getLogger(__name__)
 
 
+def _validate_settings(settings: Settings) -> None:
+    """Refuse default demo secrets outside local development."""
+    if settings.app_env == "dev":
+        return
+    unsafe: list[str] = []
+    if settings.jwt_secret == DEFAULT_JWT_SECRET:
+        unsafe.append("JWT_SECRET")
+    if settings.postgres_password == "anpr":
+        unsafe.append("POSTGRES_PASSWORD")
+    if settings.minio_secret_key == "minioadmin":
+        unsafe.append("MINIO_SECRET_KEY")
+    if unsafe:
+        raise RuntimeError(
+            "Refusing to boot with default "
+            + ", ".join(unsafe)
+            + f" while APP_ENV={settings.app_env}"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    _validate_settings(settings)
     factory = get_session_factory(settings)
     async with factory() as session:
         await apply_postgres_upgrade(session)
