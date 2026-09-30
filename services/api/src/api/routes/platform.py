@@ -46,6 +46,28 @@ def _query(ch, sql: str, parameters: dict) -> list[tuple]:
     return list(result.result_rows)
 
 
+def _od_cell(
+    origin: str,
+    destination: str,
+    trip_count: int,
+    unique_vehicles: int | None,
+    k: int,
+) -> dict[str, Any] | None:
+    """Publish an OD cell only when the vehicle count itself clears k-anonymity.
+
+    ``od_camera_hourly`` stores summed trips, not plate cardinality, so a missing
+    vehicle count must not be filled with ``trip_count``.
+    """
+    if unique_vehicles is None or unique_vehicles < k:
+        return None
+    return {
+        "origin": origin,
+        "destination": destination,
+        "trip_count": trip_count,
+        "unique_vehicles": unique_vehicles,
+    }
+
+
 async def _cameras(session) -> list[dict]:
     result = await session.execute(
         select(Camera, ST_Y(Camera.geom).label("lat"), ST_X(Camera.geom).label("lng"))
@@ -214,11 +236,38 @@ async def camera_od(
         """,
         params,
     )
-    cells = [
-        {"origin": row[0], "destination": row[1], "trip_count": int(row[2]), "unique_vehicles": int(row[2])}
-        for row in rows
-    ]
-    if not cells:
+    # SummingMergeTree rollup has no per-plate state, and converting it to an
+    # AggregatingMergeTree uniq column is not safe on a live table. Count
+    # plates from raw reads for the same window and join in process.
+    if rows:
+        counted = _query(
+            ch,
+            """
+            SELECT origin, dest, uniqExact(plate_norm) AS vehicles
+            FROM (
+                SELECT plate_norm, argMin(camera_id, ts) AS origin, argMax(camera_id, ts) AS dest
+                FROM anpr_reads
+                WHERE ts >= {start:DateTime} AND ts < {end:DateTime}
+                GROUP BY plate_norm
+                HAVING origin != dest
+            )
+            GROUP BY origin, dest
+            """,
+            params,
+        )
+        vehicles_by_pair = {(row[0], row[1]): int(row[2]) for row in counted}
+        cells = []
+        for row in rows:
+            cell = _od_cell(
+                row[0],
+                row[1],
+                int(row[2]),
+                vehicles_by_pair.get((row[0], row[1])),
+                settings.od_k_anon,
+            )
+            if cell is not None:
+                cells.append(cell)
+    else:
         derived = _query(
             ch,
             """
@@ -235,15 +284,11 @@ async def camera_od(
             """,
             params,
         )
-        cells = [
-            {
-                "origin": row[0],
-                "destination": row[1],
-                "trip_count": int(row[2]),
-                "unique_vehicles": int(row[3]),
-            }
-            for row in derived
-        ]
+        cells = []
+        for row in derived:
+            cell = _od_cell(row[0], row[1], int(row[2]), int(row[3]), settings.od_k_anon)
+            if cell is not None:
+                cells.append(cell)
     cameras = {cam["id"]: cam for cam in await _cameras(session)}
     for cell in cells:
         for end_name in ("origin", "destination"):
