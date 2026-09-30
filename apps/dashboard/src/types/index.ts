@@ -112,6 +112,7 @@ export interface TrajectorySummary {
   read_count?: number;
   camera_count?: number;
   impossible_hop_count?: number;
+  data_status?: "narrow" | "widened_to_all_history";
 }
 
 export interface GeoJSONFeatureCollection {

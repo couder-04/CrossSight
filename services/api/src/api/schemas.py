@@ -149,6 +149,7 @@ class TrajectorySummary(BaseModel):
     read_count: int
     impossible_hop_count: int
     inferred_leg_count: int
+    data_status: Literal["narrow", "widened_to_all_history"] = "narrow"
 
 
 class GeoJSONFeatureCollection(BaseModel):

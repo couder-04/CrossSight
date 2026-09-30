@@ -228,6 +228,7 @@ export function TrackView() {
             <div className="p-3 border-b border-border text-xs text-muted font-mono">
               {data.summary?.read_count ?? 0} reads · {data.summary?.camera_count ?? 0} cameras ·{" "}
               {data.summary?.impossible_hop_count ?? 0} impossible hops
+              {data.summary?.data_status === "widened_to_all_history" ? " · widened to all history" : ""}
             </div>
             <ol className="divide-y divide-border/60">
               {sightings.map((s, i) => (

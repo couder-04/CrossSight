@@ -50,9 +50,24 @@ async def get_trajectory(
     await _write_audit(session, _user.id, plate_norm, case_id, start, end, fuzzy)
 
     reads = _fetch_reads(ch, plate_norm, start, end)
+    data_status = "narrow"
     # If still empty, expand to all available history for this plate.
     if not reads and from_ts is None and to_ts is None:
-        reads = _fetch_reads(ch, plate_norm, datetime(2000, 1, 1, tzinfo=UTC), now + timedelta(days=2))
+        wide_start = datetime(2000, 1, 1, tzinfo=UTC)
+        wide_end = now + timedelta(days=2)
+        reads = _fetch_reads(ch, plate_norm, wide_start, wide_end)
+        data_status = "widened_to_all_history"
+        await _write_audit(
+            session,
+            _user.id,
+            plate_norm,
+            case_id,
+            wide_start,
+            wide_end,
+            fuzzy,
+            action="trajectory_query_widened",
+            reason="empty_result_fallback",
+        )
     if fuzzy:
         pool = _distinct_plates_in_window(ch, start, end)
         fuzzy_plates = [p for p, _ in candidates(plate_norm, pool=pool, max_cost=1.0) if p != plate_norm]
@@ -64,7 +79,7 @@ async def get_trajectory(
         sightings = reads
 
     if not sightings:
-        summary = TrajectorySummary(**trajectory_summary(plate_norm, [], [], {}))
+        summary = _summary(plate_norm, [], [], {}, data_status)
         return GeoJSONFeatureCollection(features=[], summary=summary)
 
     pairs, coords = await _load_camera_graph(session)
@@ -81,8 +96,14 @@ async def get_trajectory(
         travel_times=travel_times,
     )
     features = legs_to_geojson_features(sightings, legs)
-    summary = TrajectorySummary(**trajectory_summary(plate_norm, sightings, legs, pairs))
+    summary = _summary(plate_norm, sightings, legs, pairs, data_status)
     return GeoJSONFeatureCollection(features=features, summary=summary)
+
+
+def _summary(plate_norm, sightings, legs, pairs, data_status: str) -> TrajectorySummary:
+    payload = trajectory_summary(plate_norm, sightings, legs, pairs)
+    payload["data_status"] = data_status
+    return TrajectorySummary(**payload)
 
 
 async def _write_audit(
@@ -93,18 +114,24 @@ async def _write_audit(
     start: datetime,
     end: datetime,
     fuzzy: bool,
+    *,
+    action: str = "trajectory_query",
+    reason: str | None = None,
 ) -> None:
+    params = {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "fuzzy": fuzzy,
+    }
+    if reason is not None:
+        params["reason"] = reason
     session.add(
         AuditLogRow(
             user_id=UUID(user_id) if user_id else None,
-            action="trajectory_query",
+            action=action,
             plate_norm=plate_norm,
             case_id=case_id,
-            params={
-                "from": start.isoformat(),
-                "to": end.isoformat(),
-                "fuzzy": fuzzy,
-            },
+            params=params,
         )
     )
     await session.commit()
