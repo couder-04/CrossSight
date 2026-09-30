@@ -470,6 +470,7 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
     from api.routes.platform import camera_health, camera_od, dwell, travel_times, vehicle_classes
 
     actor = UserContext(id="", username="export", role=Role(role))
+    row_limit = min(5000, max(1, int(settings.export_sync_row_limit)))
 
     start = _dt(filters.get("start")) if filters.get("start") else None
     end = _dt(filters.get("end")) if filters.get("end") else None
@@ -487,7 +488,9 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
         headers = ["origin", "destination", "count", "avg_s", "median_s", "min_s", "max_s", "p90_s"]
         records = [[r.get(h) for h in headers] for r in data["routes"]]
     elif kind == "dwell":
-        data = await dwell(ch, settings, actor, start, end, filters.get("camera_id"))
+        data = await dwell(
+            ch, settings, actor, start, end, filters.get("camera_id"), limit=row_limit
+        )
         headers = ["plate", "camera_id", "dwell_s", "classification", "entry_ts", "exit_ts"]
         records = [[s.get(h) for h in headers] for s in data["sessions"]]
     elif kind in {"vehicles", "traffic"}:
@@ -538,7 +541,16 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
             raise ValueError("investigation export requires a plate filter")
         from api.routes.platform import investigation
 
-        data = await investigation(ch, session, actor, plate, filters.get("camera_id"), start, end)
+        data = await investigation(
+            ch,
+            session,
+            actor,
+            plate,
+            filters.get("camera_id"),
+            start,
+            end,
+            limit=row_limit,
+        )
         headers = ["camera_id", "ts", "plate_norm", "confidence", "vehicle_class"]
         records = [[s.get(h) for h in headers] for s in data["sightings"]]
     lines = [", ".join(str(cell) for cell in record) for record in records[:40]]

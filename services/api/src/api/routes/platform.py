@@ -12,6 +12,7 @@ from anpr_common.intelligence.health import CameraHealthThresholds, classify_cam
 from anpr_common.intelligence.journeys import aggregate_vehicle_classes, sessionize_dwell
 from anpr_common.schemas import AlertSeverity, AlertType
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.params import Param
 from geoalchemy2.functions import ST_X, ST_Y
 from sqlalchemy import select
 
@@ -39,6 +40,18 @@ def _window(start: datetime | None, end: datetime | None) -> tuple[datetime, dat
 
 def _naive(value: datetime) -> datetime:
     return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _resolved(value: Any, fallback: Any) -> Any:
+    """Return a concrete value when a route function is called directly.
+
+    FastAPI fills Query defaults only for HTTP requests. Export jobs call these
+    functions themselves, and a Query object is not a ClickHouse parameter.
+    """
+    if isinstance(value, Param):
+        default = value.default
+        return fallback if default is ... else default
+    return value
 
 
 def _query(ch, sql: str, parameters: dict) -> list[tuple]:
@@ -404,6 +417,7 @@ async def dwell(
     camera_id: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
+    limit = _resolved(limit, 500)
     begin, finish = _window(start, end)
     params: dict[str, Any] = {"start": _naive(begin), "end": _naive(finish), "limit": limit}
     where = "entry_ts >= {start:DateTime} AND entry_ts < {end:DateTime}"
@@ -559,6 +573,8 @@ async def recent_reads(
     limit: int = Query(40, ge=1, le=200),
     source: str = Query("sim"),
 ) -> dict[str, Any]:
+    limit = _resolved(limit, 40)
+    source = _resolved(source, "sim")
     end = datetime.now(UTC)
     start = end - timedelta(minutes=15)
     params: dict[str, Any] = {"start": _naive(start), "limit": limit}
@@ -640,6 +656,7 @@ async def investigation(
     end: datetime | None = None,
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
+    limit = _resolved(limit, 500)
     if not role_can(user.role.value, "investigate"):
         raise HTTPException(status_code=403, detail="Not permitted")
     begin, finish = _window(start, end)

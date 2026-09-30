@@ -27,9 +27,41 @@ flowchart LR
   DASH -->|WS live| API
 ```
 
+## Dashboard
 
+Control-room UI (Pune demo). Open [http://localhost:3000](http://localhost:3000) after the quickstart below.
 
+**Live** (`/live`) — city map, live plate reads, critical alerts, speed, and congested segments.
 
+![Live map with reads, alerts, and congestion](docs/screenshots/live.jpg)
+
+**Wall** (`/wall`) — live camera grid with plate overlays.
+
+![Camera wall of seven live feeds](docs/screenshots/wall.jpg)
+
+**Alerts** (`/alerts`) — active queue with severity, type, and status filters, plotted on the map.
+
+![Alerts list beside the city map](docs/screenshots/alerts.jpg)
+
+**Track** (`/track`) — plate search, read timeline, and playback of the reconstructed path.
+
+![Plate track with timeline and map marker](docs/screenshots/track.jpg)
+
+**Review** (`/review`) — enforcement queue: approve, dismiss, or close a case, then export.
+
+![Enforcement review queue](docs/screenshots/review.png)
+
+**Flow** (`/flow`) — origin–destination, travel time, and vehicle class tables on the city map.
+
+![Traffic flow map with OD, travel time, and vehicle classes](docs/screenshots/flow.jpg)
+
+**Analytics** (`/analytics`) — corridor density, camera flow, bottlenecks, and volume anomalies.
+
+![Analytics map with flow corridors](docs/screenshots/analytics.jpg)
+
+**Import** (`/imports`) — CCTV or plate stills, plus watchlist and camera-table ingest.
+
+![Upload and import](docs/screenshots/import.png)
 
 ## Implementation status
 
@@ -44,7 +76,7 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 | Simulator | Synthetic city, ~60 cameras, scripted watchlist / clone / convoy / loiter / wrong-way / geofence cases |
 | Workers | Ingest, analytics (per-lane flow, congestion, OD, route-density, bottlenecks), alerts (watchlist, clone, convoy, loiter, geofence, wrong-way, **route anomaly**, FileRegistry mismatch (when `REGISTRY_PATH` set; noop otherwise)) |
 | API | Trajectory + audit/RBAC, heatmap/flow/segments/OD/bottlenecks/anomalies/**route-density**, alerts workflow, **`GET /crops`** |
-| Dashboard | `/live` heatmap + route-density + speed KPI; `/track` path + **crop thumbs**; `/analytics`; `/alerts` incl. route anomaly; `/admin` |
+| Dashboard | `/live` map, reads, alerts, congestion; `/wall` camera grid; `/alerts`; `/track` path + **crop thumbs**; `/review` enforcement queue; `/flow` OD and travel time; `/analytics` corridors; `/imports`; `/admin` |
 | OCR engine | PlateOCR **`india-v1`** (default) + Indian format decode, CLAHE/classical deblur, lane attribution, multi-frame fusion, fleet CLI + RTSP reconnect; legacy YOLO+PARSeq |
 
 ### Left
@@ -117,8 +149,13 @@ If the API is on 8002, set `NEXT_PUBLIC_API_URL=http://localhost:8002` and `NEXT
 Demo checklist after `make simulate`:
 
 - `/live` — heatmap, congested segments, route-density corridors, alert toasts
-- `/track` — search a watchlist plate from `services/simulator/data/scenarios.json` with a case ID
+- `/wall` — live camera grid
 - `/alerts` — watchlist / clone / convoy / loiter / geofence / wrong-way / route anomaly
+- `/track` — search a watchlist plate from `services/simulator/data/scenarios.json` with a case ID
+- `/review` — approve, dismiss, or close queued cases
+- `/flow` — origin–destination, travel time, vehicle classes
+- `/analytics` — corridors, bottlenecks, volume anomalies
+- `/imports` — CCTV, plate stills, watchlist CSV
 
 **Note:** `make seed` / `simulate` / `backfill` use `--synthetic` by default so demos work offline. Drop `--synthetic` in the Makefile to prefer live OSM when network is available.
 
