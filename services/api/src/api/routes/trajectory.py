@@ -70,7 +70,9 @@ async def get_trajectory(
         )
     if fuzzy:
         pool = _distinct_plates_in_window(ch, start, end)
-        fuzzy_plates = [p for p, _ in candidates(plate_norm, pool=pool, max_cost=1.0) if p != plate_norm]
+        fuzzy_plates = [
+            p for p, _ in candidates(plate_norm, pool=pool, max_cost=1.0) if p != plate_norm
+        ]
         candidate_reads: dict[str, list[Sighting]] = {}
         for fp in fuzzy_plates:
             candidate_reads[fp] = _fetch_reads(ch, fp, start, end)
@@ -192,7 +194,7 @@ def _fetch_travel_times(ch, at: datetime) -> dict[tuple[str, str], float]:
     """
     try:
         result = ch.query(query, parameters={"start": hour_start})
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
     return {(row[0], row[1]): float(row[2]) for row in result.result_rows}
 
@@ -211,9 +213,7 @@ async def _load_camera_graph(
         )
         pairs[(p.camera_a, p.camera_b)] = info
 
-    cam_result = await session.execute(
-        select(Camera.id, ST_Y(Camera.geom), ST_X(Camera.geom))
-    )
+    cam_result = await session.execute(select(Camera.id, ST_Y(Camera.geom), ST_X(Camera.geom)))
     coords: dict[str, tuple[float, float]] = {}
     for cam_id, lat, lng in cam_result.all():
         coords[cam_id] = (float(lat), float(lng))

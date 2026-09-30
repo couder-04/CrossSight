@@ -9,6 +9,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from anpr_common.grammar import normalize_plate
 
@@ -181,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     gt_map = {str(r.image_path): r.gt_plate for r in rows}
     gt_map.update({r.image_path.name: r.gt_plate for r in rows})
 
+    recognizer: Any
     if args.recognizer == "mock":
         recognizer = MockRecognizer(ground_truth=gt_map)
         model_ids = {"recognizer": "MockRecognizer", "plate_det": "n/a (eval images only)"}

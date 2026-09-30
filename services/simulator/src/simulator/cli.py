@@ -9,6 +9,7 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import psycopg2.extras
 from anpr_common.config import get_settings
@@ -16,9 +17,15 @@ from anpr_common.config import get_settings
 from simulator.cameras import Camera
 from simulator.emit import ReadEmitter, build_injected_read, process_traversal
 from simulator.graph import load_graph
-from simulator.scenarios import load_scenarios, scenario_injections, tag_vehicles_for_scenarios
+from simulator.scenarios import (
+    InjectedEvent,
+    load_scenarios,
+    scenario_injections,
+    tag_vehicles_for_scenarios,
+)
 from simulator.seed import connect_pg, run_seed
 from simulator.trips import (
+    TraversalEvent,
     build_edge_betweenness,
     build_zone_node_map,
     iter_traversals,
@@ -99,7 +106,9 @@ def run_simulation(
     scenarios = load_scenarios()
     zone_ids = [z["id"] for z in zones] or ["ward-001"]
 
-    reserved = scenarios.get("watchlist_plates", []) + scenarios.get("expected_alerts", {}).get("cloned_plate", [])
+    reserved = scenarios.get("watchlist_plates", []) + scenarios.get("expected_alerts", {}).get(
+        "cloned_plate", []
+    )
     vehicles = generate_fleet(settings, zone_ids, reserved_plates=reserved)
     if scenarios:
         from simulator.scenarios import ScenarioBundle
@@ -174,11 +183,12 @@ def run_simulation(
                     time.sleep(min(delay, 1.0))
 
             if kind == "traversal":
-                process_traversal(payload, emitter, rng)
+                process_traversal(cast(TraversalEvent, payload), emitter, rng)
             else:
-                cam = cam_by_id[payload.camera_id]
-                vehicle = vehicles_by_plate.get(payload.plate_norm)
-                read = build_injected_read(payload, cam, vehicle, rng)
+                injected = cast(InjectedEvent, payload)
+                cam = cam_by_id[injected.camera_id]
+                vehicle = vehicles_by_plate.get(injected.plate_norm)
+                read = build_injected_read(injected, cam, vehicle, rng)
                 emitter.emit(read, camera_name=cam.name)
 
             if backfill_days and idx % 5000 == 0 and idx > 0:
@@ -225,8 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
     seed_p.set_defaults(func=cmd_seed)
 
     sim_p = sub.add_parser("simulate", help="Run live or backfill simulation")
-    sim_p.add_argument("--speed", type=float, default=None, help="Live speed multiplier (default from SIM_SPEED)")
-    sim_p.add_argument("--backfill-days", type=int, default=None, help="Fast historical backfill in days")
+    sim_p.add_argument(
+        "--speed", type=float, default=None, help="Live speed multiplier (default from SIM_SPEED)"
+    )
+    sim_p.add_argument(
+        "--backfill-days", type=int, default=None, help="Fast historical backfill in days"
+    )
     sim_p.add_argument("--synthetic", action="store_true", help="Force synthetic grid graph")
     sim_p.add_argument("--output", type=str, default=None, help="Optional JSONL output file")
     sim_p.add_argument("--no-kafka", action="store_true", help="Disable Kafka publishing")

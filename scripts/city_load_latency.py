@@ -17,7 +17,7 @@ import statistics
 import sys
 import time
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,7 +37,7 @@ def _pct(sorted_vals: list[float], p: float) -> float:
         return 0.0
     if len(sorted_vals) == 1:
         return sorted_vals[0]
-    idx = min(len(sorted_vals) - 1, max(0, int(round(p * (len(sorted_vals) - 1)))))
+    idx = min(len(sorted_vals) - 1, max(0, round(p * (len(sorted_vals) - 1))))
     return sorted_vals[idx]
 
 
@@ -132,7 +132,9 @@ async def camera_publisher(
     while time.monotonic() - start_mono < duration_s:
         now = datetime.now(UTC)
         wall = time.time()
-        use_wl = bool(watchlist) and watchlist_every > 0 and seq > 0 and (seq % watchlist_every == 0)
+        use_wl = (
+            bool(watchlist) and watchlist_every > 0 and seq > 0 and (seq % watchlist_every == 0)
+        )
         plate = watchlist[(cam_idx + seq) % len(watchlist)] if use_wl else make_plate(cam_idx, seq)
         eid = str(uuid.uuid4())
         read = PlateRead(
@@ -198,15 +200,17 @@ async def ingest_poller(settings, state: SharedState) -> None:
             chunk = pending[i : i + 300]
             in_list = ", ".join(f"'{e}'" for e in chunk)
 
-            def _q(sql: str = (
-                "SELECT toString(event_id) FROM anpr_reads "
-                f"WHERE toString(event_id) IN ({in_list})"
-            )):
+            def _q(
+                sql: str = (
+                    "SELECT toString(event_id) FROM anpr_reads "
+                    f"WHERE toString(event_id) IN ({in_list})"
+                ),
+            ):
                 return ch.query(sql).result_rows
 
             try:
                 rows = await asyncio.to_thread(_q)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 rows = []
             for (eid,) in rows:
                 found.append(eid)
@@ -220,8 +224,8 @@ async def ingest_poller(settings, state: SharedState) -> None:
 
 async def alert_consumer(settings, state: SharedState) -> None:
     """Listen on alerts.v1 for watchlist alerts; latency = receive_wall - plate publish_wall."""
-    from aiokafka import AIOKafkaConsumer
     import orjson
+    from aiokafka import AIOKafkaConsumer
 
     consumer = AIOKafkaConsumer(
         settings.topic_alerts,
@@ -237,12 +241,12 @@ async def alert_consumer(settings, state: SharedState) -> None:
                 msg = await asyncio.wait_for(consumer.getone(), timeout=0.5)
             except TimeoutError:
                 continue
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             wall = time.time()
             try:
                 data = orjson.loads(msg.value)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             if data.get("type") != "watchlist":
                 continue
@@ -296,33 +300,33 @@ def write_reports(payload: dict[str, Any]) -> None:
     pc = payload["pass_criteria"]
     md = f"""# City multi-camera load & latency proof
 
-**Overall: {'PASS' if payload['overall_pass'] else 'FAIL'}**
+**Overall: {"PASS" if payload["overall_pass"] else "FAIL"}**
 
-- Cameras in parallel: **{cfg['cameras']}**
-- Duration: **{cfg['duration_s']}s** @ **{cfg['rate_per_cam']}/cam/s** (target ≈{cfg['target_aggregate_rps']} reads/s)
-- Published: **{pub['total']}** reads (**{pub['throughput_rps']}** rps)
-- Ingest recovery: **{ing['recovered']}/{pub['total']}** ({ing['recovery_rate']*100:.1f}%)
-- Cameras with ingested data: **{ing['cameras_with_data']}/{cfg['cameras']}**
-- Camera fairness CV: **{pub['fairness_cv']}** (0 = perfectly even)
+- Cameras in parallel: **{cfg["cameras"]}**
+- Duration: **{cfg["duration_s"]}s** @ **{cfg["rate_per_cam"]}/cam/s** (target ≈{cfg["target_aggregate_rps"]} reads/s)
+- Published: **{pub["total"]}** reads (**{pub["throughput_rps"]}** rps)
+- Ingest recovery: **{ing["recovered"]}/{pub["total"]}** ({ing["recovery_rate"] * 100:.1f}%)
+- Cameras with ingested data: **{ing["cameras_with_data"]}/{cfg["cameras"]}**
+- Camera fairness CV: **{pub["fairness_cv"]}** (0 = perfectly even)
 
 ## Latency (measured live during the run)
 
 | Pipeline | n | p50 | p95 | p99 | max |
 |---|---:|---:|---:|---:|---:|
-| Ingest Kafka→ClickHouse | {ing['latency_s']['n']} | {ing['latency_s']['p50']}s | {ing['latency_s']['p95']}s | {ing['latency_s']['p99']}s | {ing['latency_s']['max']}s |
-| Alert watchlist→alerts.v1 | {al['latency_s']['n']} | {al['latency_s']['p50']}s | {al['latency_s']['p95']}s | {al['latency_s']['p99']}s | {al['latency_s']['max']}s |
+| Ingest Kafka→ClickHouse | {ing["latency_s"]["n"]} | {ing["latency_s"]["p50"]}s | {ing["latency_s"]["p95"]}s | {ing["latency_s"]["p99"]}s | {ing["latency_s"]["max"]}s |
+| Alert watchlist→alerts.v1 | {al["latency_s"]["n"]} | {al["latency_s"]["p50"]}s | {al["latency_s"]["p95"]}s | {al["latency_s"]["p99"]}s | {al["latency_s"]["max"]}s |
 
 ## Pass criteria (spec: alert p95 < 3s)
 
-- alert p95 < 3s: **{pc['alert_p95_lt_3s']}**
-- ingest p95 < 5s: **{pc['ingest_p95_lt_5s']}**
-- ingest recovery ≥ 95%: **{pc['ingest_recovery_ge_95pct']}**
-- all cameras recovered: **{pc['all_cameras_recovered']}**
-- camera fairness CV < 0.35: **{pc['camera_fairness_cv_lt_0_35']}**
+- alert p95 < 3s: **{pc["alert_p95_lt_3s"]}**
+- ingest p95 < 5s: **{pc["ingest_p95_lt_5s"]}**
+- ingest recovery ≥ 95%: **{pc["ingest_recovery_ge_95pct"]}**
+- all cameras recovered: **{pc["all_cameras_recovered"]}**
+- camera fairness CV < 0.35: **{pc["camera_fairness_cv_lt_0_35"]}**
 
 ## Method
 
-Each of {cfg['cameras']} cameras runs as its own asyncio task and publishes concurrently.
+Each of {cfg["cameras"]} cameras runs as its own asyncio task and publishes concurrently.
 Ingest latency is first ClickHouse visibility during the run (not post-hoc).
 Alert latency is Kafka `alerts.v1` receive time minus watchlist publish wall clock.
 """
@@ -350,8 +354,10 @@ async def reset_alerts_consumer_lag(settings) -> None:
     ]
     for cmd in cmds:
         try:
-            subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
-        except Exception as exc:
+            await asyncio.to_thread(
+                subprocess.run, cmd, check=False, capture_output=True, text=True, timeout=30
+            )
+        except Exception as exc:  # noqa: BLE001
             print(f"warn: could not seek consumer group ({exc})")
 
 
@@ -410,7 +416,7 @@ async def main() -> int:
     wall0 = time.time()
     print(
         f"Publishing: cameras={len(cameras)} rate/cam={args.rate}/s "
-        f"duration={args.duration}s ≈{len(cameras)*args.rate:.0f} rps aggregate"
+        f"duration={args.duration}s ≈{len(cameras) * args.rate:.0f} rps aggregate"
     )
     try:
         counts = await asyncio.gather(
@@ -436,7 +442,9 @@ async def main() -> int:
     publish_elapsed = time.time() - wall0
     total = sum(counts)
     throughput = total / publish_elapsed if publish_elapsed else 0.0
-    print(f"Published {total} in {publish_elapsed:.2f}s ({throughput:.1f}/s) — draining {args.drain}s…")
+    print(
+        f"Published {total} in {publish_elapsed:.2f}s ({throughput:.1f}/s) — draining {args.drain}s…"
+    )
     await asyncio.sleep(args.drain)
     state.stop_poll.set()
     # allow poller to finish remaining
@@ -458,7 +466,9 @@ async def main() -> int:
 
     counts_list = [cam_counts.get(c, 0) for c in cameras]
     mean_c = statistics.fmean(counts_list) if counts_list else 0
-    fairness_cv = (statistics.pstdev(counts_list) / mean_c) if mean_c and len(counts_list) > 1 else 0.0
+    fairness_cv = (
+        (statistics.pstdev(counts_list) / mean_c) if mean_c and len(counts_list) > 1 else 0.0
+    )
     recovery = len(ingest_vals) / total if total else 0.0
     ingest_summary = _summary(ingest_vals)
     alert_summary = _summary(alert_lats)

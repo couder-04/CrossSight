@@ -1,7 +1,6 @@
 """Grammar unit tests — ≥40 cases covering formats, legacy codes, corrections."""
 
 import pytest
-
 from anpr_common.grammar import normalize_plate
 
 

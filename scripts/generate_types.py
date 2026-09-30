@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from anpr_common.schemas import export_json_schemas
@@ -28,8 +27,7 @@ def _json_type_to_ts(schema: dict, defs: dict, name: str | None = None) -> str:
     t = schema.get("type")
     if isinstance(t, list):
         return " | ".join(
-            "null" if x == "null" else _json_type_to_ts({**schema, "type": x}, defs)
-            for x in t
+            "null" if x == "null" else _json_type_to_ts({**schema, "type": x}, defs) for x in t
         )
     if "enum" in schema:
         return " | ".join(json.dumps(v) for v in schema["enum"])

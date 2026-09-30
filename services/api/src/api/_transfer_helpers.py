@@ -330,6 +330,7 @@ async def _process_media(upload_id: UUID) -> None:
             data = obj.read()
             obj.close()
             obj.release_conn()
+            result: dict[str, Any]
             if row.kind == "image":
                 found = recognize_bgr(decode_image(data))
                 result = {
@@ -364,7 +365,7 @@ async def _process_media(upload_id: UUID) -> None:
                 result["published"] = await _publish_reads(settings, result["reads"], row)
                 row.status = "completed"
                 row.error = None
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 result["publish_error"] = str(exc)[:500]
                 row.status = "failed"
                 row.error = f"OCR finished but Kafka publish failed: {exc}"[:500]
@@ -464,17 +465,15 @@ async def _run_export(export_id: UUID, role: str) -> None:
 
 
 async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
+    from api.auth import Role, UserContext
     from api.routes.platform import camera_health, camera_od, dwell, travel_times, vehicle_classes
 
-    class _User:
-        role = type("R", (), {"value": role})()
-        id = ""
-        username = "export"
+    actor = UserContext(id="", username="export", role=Role(role))
 
     start = _dt(filters.get("start")) if filters.get("start") else None
     end = _dt(filters.get("end")) if filters.get("end") else None
     if kind in {"od", "flow"}:
-        data = await camera_od(ch, session, settings, _User(), start, end)
+        data = await camera_od(ch, session, settings, actor, start, end)
         headers = ["origin", "destination", "trip_count", "unique_vehicles"]
         records = [
             [c["origin"], c["destination"], c["trip_count"], c["unique_vehicles"]]
@@ -482,20 +481,20 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
         ]
     elif kind == "travel":
         data = await travel_times(
-            ch, settings, _User(), start, end, filters.get("origin"), filters.get("destination")
+            ch, settings, actor, start, end, filters.get("origin"), filters.get("destination")
         )
         headers = ["origin", "destination", "count", "avg_s", "median_s", "min_s", "max_s", "p90_s"]
         records = [[r.get(h) for h in headers] for r in data["routes"]]
     elif kind == "dwell":
-        data = await dwell(ch, settings, _User(), start, end, filters.get("camera_id"))
+        data = await dwell(ch, settings, actor, start, end, filters.get("camera_id"))
         headers = ["plate", "camera_id", "dwell_s", "classification", "entry_ts", "exit_ts"]
         records = [[s.get(h) for h in headers] for s in data["sessions"]]
     elif kind in {"vehicles", "traffic"}:
-        data = await vehicle_classes(ch, _User(), start, end, filters.get("camera_id"))
+        data = await vehicle_classes(ch, actor, start, end, filters.get("camera_id"))
         headers = ["vehicle_class", "count", "share"]
         records = [[k, data["counts"].get(k, 0), data["shares"].get(k, 0)] for k in data["counts"]]
     elif kind == "camera_health":
-        data = await camera_health(ch, session, settings, _User(), start, end)
+        data = await camera_health(ch, session, settings, actor, start, end)
         headers = ["camera_id", "state", "last_read", "age_s", "read_rate_per_min"]
         records = [[c[h] for h in headers] for c in data["cameras"]]
     elif kind in {"incidents", "enforcement"}:
@@ -538,9 +537,7 @@ async def _collect(session, ch, settings, kind: str, filters: dict, role: str):
             raise ValueError("investigation export requires a plate filter")
         from api.routes.platform import investigation
 
-        data = await investigation(
-            ch, session, _User(), plate, filters.get("camera_id"), start, end
-        )
+        data = await investigation(ch, session, actor, plate, filters.get("camera_id"), start, end)
         headers = ["camera_id", "ts", "plate_norm", "confidence", "vehicle_class"]
         records = [[s.get(h) for h in headers] for s in data["sightings"]]
     lines = [", ".join(str(cell) for cell in record) for record in records[:40]]

@@ -132,9 +132,7 @@ def build_injected_read(
         force=injection.force_emit,
     )
     if read is None:
-        read = build_plate_read(
-            v, camera, injection.ts, direction, 35.0, rng, force=True
-        )
+        read = build_plate_read(v, camera, injection.ts, direction, 35.0, rng, force=True)
     assert read is not None
     return read
 
@@ -180,7 +178,7 @@ class ReadEmitter:
                     batch_size=16384,
                 )
                 logger.info("Kafka producer connected to %s", self.settings.kafka_bootstrap)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("Kafka unavailable (%s); reads will use fallback sinks only", exc)
                 self._producer = None
 
@@ -195,7 +193,7 @@ class ReadEmitter:
                     password=self.settings.clickhouse_password,
                     database=self.settings.clickhouse_db,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("ClickHouse unavailable (%s)", exc)
                 self._ch_client = None
 
@@ -292,7 +290,7 @@ class ReadEmitter:
                     "h3_r7",
                 ],
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("ClickHouse insert failed: %s", exc)
 
 

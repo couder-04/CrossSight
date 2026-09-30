@@ -16,7 +16,12 @@ import csv
 import json
 from pathlib import Path
 
-from anpr_common.intelligence.evalmetrics import latency_summary, matching_summary, summarize_ocr, tracking_consistency
+from anpr_common.intelligence.evalmetrics import (
+    latency_summary,
+    matching_summary,
+    summarize_ocr,
+    tracking_consistency,
+)
 
 SCENES = ("day", "night", "toll", "highway", "urban", "gantry")
 
@@ -50,7 +55,9 @@ def evaluate_tree(root: Path, predictions: dict[str, str] | None = None) -> dict
         media = [
             path.name
             for path in folder.iterdir()
-            if path.is_file() and path.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
+            if path.is_file()
+            and path.suffix.lower()
+            in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
         ]
         truth = load_ground_truth(folder)
         scene_pairs = []

@@ -78,7 +78,7 @@ def order_corners(pts: np.ndarray) -> np.ndarray:
 def is_two_row_plate(corners: np.ndarray) -> bool:
     w = np.linalg.norm(corners[1] - corners[0])
     h = np.linalg.norm(corners[3] - corners[0])
-    aspect = max(w, h) / max(min(w, h), 1e-6)
+    aspect = float(max(w, h)) / max(float(min(w, h)), 1e-6)
     return aspect < 2.2
 
 
@@ -119,7 +119,7 @@ class VehicleDetector:
         r = results[0]
         if r.boxes is None:
             return detections
-        for box in r.boxes:
+        for box in r.boxes:  # type: ignore[attr-defined]
             cls_id = int(box.cls.item())
             if cls_id not in COCO_VEHICLE_IDS:
                 continue
@@ -151,12 +151,12 @@ class PlateDetector:
         out: list[PlateDetection] = []
         if not results:
             return out
-        r = results[0]
-        if r.boxes is None:
+        r = results[0]  # type: ignore[index]
+        if r.boxes is None:  # type: ignore[union-attr]
             return out
 
         kpts = getattr(r, "keypoints", None)
-        for i, box in enumerate(r.boxes):
+        for i, box in enumerate(r.boxes):  # type: ignore[union-attr]
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             conf = float(box.conf.item())
             corners: np.ndarray

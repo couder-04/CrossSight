@@ -30,7 +30,12 @@ from anpr_common.intelligence.exporters import (
     rows_to_json,
     rows_to_pdf,
 )
-from anpr_common.intelligence.filesafety import object_key, redact_stream_url, safe_filename, validate_upload
+from anpr_common.intelligence.filesafety import (
+    object_key,
+    redact_stream_url,
+    safe_filename,
+    validate_upload,
+)
 from anpr_common.intelligence.health import CameraHealthThresholds, classify_camera_health
 from anpr_common.intelligence.importers import (
     preview_calibration,
@@ -105,7 +110,9 @@ def test_camera_change_closes_dwell_without_merging():
 
 
 def test_per_camera_threshold_override():
-    custom = thresholds_for_camera("cam-a", THRESH, {"cam-a": {"incident_s": 240, "excessive_s": 200}})
+    custom = thresholds_for_camera(
+        "cam-a", THRESH, {"cam-a": {"incident_s": 240, "excessive_s": 200}}
+    )
     assert classify_dwell(190, custom).value == "short_stop"
     assert thresholds_for_camera("cam-b", THRESH, {"cam-a": {"incident_s": 240}}) == THRESH
 
@@ -187,8 +194,19 @@ def test_travel_rejects_impossible_and_summarizes():
 
 def test_session_dwell_compares_expected():
     rows = [
-        {"plate": "MH12AB1234", "camera_id": "cam-a", "ts": T0, "vehicle_class": "car", "confidence": 0.9},
-        {"plate": "MH12AB1234", "camera_id": "cam-a", "ts": T0 + timedelta(seconds=200), "vehicle_class": "car"},
+        {
+            "plate": "MH12AB1234",
+            "camera_id": "cam-a",
+            "ts": T0,
+            "vehicle_class": "car",
+            "confidence": 0.9,
+        },
+        {
+            "plate": "MH12AB1234",
+            "camera_id": "cam-a",
+            "ts": T0 + timedelta(seconds=200),
+            "vehicle_class": "car",
+        },
     ]
     sessions = sessionize_dwell(
         rows,
@@ -284,7 +302,9 @@ def test_rbac_matrix():
 
 def test_upload_magic_bytes_and_limits():
     jpeg = b"\xff\xd8\xff" + b"\x00" * 16
-    meta = validate_upload(filename="plate.jpg", data=jpeg, kind="image", max_bytes=1024, claimed_type="image/jpeg")
+    meta = validate_upload(
+        filename="plate.jpg", data=jpeg, kind="image", max_bytes=1024, claimed_type="image/jpeg"
+    )
     assert meta["mime"] == "image/jpeg"
     with pytest.raises(ValueError):
         validate_upload(filename="plate.jpg", data=b"not-an-image", kind="image", max_bytes=1024)
@@ -293,7 +313,10 @@ def test_upload_magic_bytes_and_limits():
     with pytest.raises(ValueError):
         validate_upload(filename="big.jpg", data=jpeg, kind="image", max_bytes=8)
     mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 8
-    assert validate_upload(filename="cctv.mp4", data=mp4, kind="video", max_bytes=1024)["mime"] == "video/mp4"
+    assert (
+        validate_upload(filename="cctv.mp4", data=mp4, kind="video", max_bytes=1024)["mime"]
+        == "video/mp4"
+    )
     with pytest.raises(ValueError):
         validate_upload(filename="cctv.exe", data=mp4, kind="video", max_bytes=1024)
     assert safe_filename("../../a b.jpg") == "a_b.jpg"
@@ -353,12 +376,14 @@ def test_camera_calibration_and_zone_previews():
     assert calib["valid_count"] == 1
     bad = preview_calibration('{"camera_id":"cam-1","homography":[[0,0,0],[0,0,0],[0,0,0]]}')
     assert bad["invalid_count"] == 1
-    assert validate_calibration({"camera_id": ""}) 
+    assert validate_calibration({"camera_id": ""})
     zones = preview_zones(
         '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"z1","name":"Ward","kind":"ward"},"geometry":{"type":"Polygon","coordinates":[[[73.8,18.5],[73.9,18.5],[73.9,18.6],[73.8,18.5]]]}}]}'
     )
     assert zones["valid_count"] == 1
-    broken = preview_zones('{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"z2","kind":"nope"},"geometry":{"type":"Point","coordinates":[0,0]}}]}')
+    broken = preview_zones(
+        '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"id":"z2","kind":"nope"},"geometry":{"type":"Point","coordinates":[0,0]}}]}'
+    )
     assert broken["invalid_count"] == 1
 
 
@@ -393,7 +418,14 @@ def test_evidence_clip_window_and_overlay_use_existing_metadata():
     assert clip_window(1, 5, 2, 30) == (0, 3)
     assert clip_window(10, 1, 1, 0) is None
     plan = overlay_plan(
-        {"bbox": [1, 2, 3, 4], "track_id": 9, "plate": "MH12AB1234", "confidence": 0.8, "vehicle_class": "car", "alert": "stopped_vehicle"}
+        {
+            "bbox": [1, 2, 3, 4],
+            "track_id": 9,
+            "plate": "MH12AB1234",
+            "confidence": 0.8,
+            "vehicle_class": "car",
+            "alert": "stopped_vehicle",
+        }
     )
     assert plan[0]["op"] == "rect"
     assert any(str(item.get("text", "")).startswith("MH12AB1234") for item in plan)
@@ -407,6 +439,11 @@ def test_eval_metrics_do_not_invent_accuracy():
     assert scored["n"] == 2
     assert scored["exact"] == 0.5
     assert character_accuracy("MH12AB1234", "MH12AB1234") == 1
-    assert tracking_consistency([("1", "MH12AB1234"), ("1", "MH12AB1234"), ("2", "KA01AA0001"), ("2", "DL1AA0001")]) == 0.5
+    assert (
+        tracking_consistency(
+            [("1", "MH12AB1234"), ("1", "MH12AB1234"), ("2", "KA01AA0001"), ("2", "DL1AA0001")]
+        )
+        == 0.5
+    )
     assert matching_summary([{"kind": "FUZZY_PLATE_MATCH"}])["accuracy"] is None
     assert latency_summary([10, 30, 20])["mean_ms"] == 20

@@ -77,7 +77,7 @@ class IngestWorker:
         # Next offset to commit per (topic, partition). Advanced only as reads are buffered.
         self._pending_offsets: dict[tuple[str, int], int] = {}
         self._cameras: dict[str, Any] = {}
-        self._redis = None
+        self._redis: Any | None = None
         self._ch: ClickHouseClient | None = None
         self._dedup: HybridDedup | None = None
         self._pg_pool = None
@@ -166,7 +166,9 @@ class IngestWorker:
             f"lastseen:{plate}",
             mapping={
                 "camera_id": read.camera_id,
-                "ts": read.ts.replace(tzinfo=UTC).isoformat() if read.ts.tzinfo is None else read.ts.isoformat(),
+                "ts": read.ts.replace(tzinfo=UTC).isoformat()
+                if read.ts.tzinfo is None
+                else read.ts.isoformat(),
                 "confidence": str(read.confidence),
             },
         )

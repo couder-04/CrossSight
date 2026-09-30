@@ -42,7 +42,9 @@ class FakeClickHouse:
 
 
 @contextmanager
-def _client(k: int, rollup: list[tuple], vehicles: list[tuple]) -> Iterator[tuple[TestClient, FakeClickHouse]]:
+def _client(
+    k: int, rollup: list[tuple], vehicles: list[tuple]
+) -> Iterator[tuple[TestClient, FakeClickHouse]]:
     ch = FakeClickHouse(rollup, vehicles)
     settings = get_settings().model_copy(update={"od_k_anon": k})
 
@@ -64,7 +66,10 @@ def _client(k: int, rollup: list[tuple], vehicles: list[tuple]) -> Iterator[tupl
 
 
 def test_rollup_unique_vehicles_is_not_trip_count():
-    with _client(k=3, rollup=[("cam-a", "cam-b", 5)], vehicles=[("cam-a", "cam-b", 3)]) as (client, ch):
+    with _client(k=3, rollup=[("cam-a", "cam-b", 5)], vehicles=[("cam-a", "cam-b", 3)]) as (
+        client,
+        ch,
+    ):
         resp = client.get("/ops/od")
     assert resp.status_code == 200
     cells = resp.json()["cells"]
@@ -75,7 +80,10 @@ def test_rollup_unique_vehicles_is_not_trip_count():
 
 
 def test_unique_vehicles_below_k_anon_suppresses_cell():
-    with _client(k=5, rollup=[("cam-a", "cam-b", 6)], vehicles=[("cam-a", "cam-b", 4)]) as (client, ch):
+    with _client(k=5, rollup=[("cam-a", "cam-b", 6)], vehicles=[("cam-a", "cam-b", 4)]) as (
+        client,
+        ch,
+    ):
         resp = client.get("/ops/od")
     assert resp.status_code == 200
     body = resp.json()

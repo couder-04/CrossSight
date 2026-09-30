@@ -8,7 +8,9 @@ from ocr_engine.plate_format import (
 )
 
 
-def _one_hot_probs(text: str, alphabet: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", slots: int = 10):
+def _one_hot_probs(
+    text: str, alphabet: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", slots: int = 10
+):
     """Build near-one-hot slot probabilities that favour ``text`` then pad."""
     probs = np.full((slots, len(alphabet)), 1e-4, dtype=np.float64)
     pad = alphabet.index("_")
@@ -21,14 +23,18 @@ def _one_hot_probs(text: str, alphabet: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVW
 
 
 def test_decode_india_standard_plate():
-    text, confs = decode_india(_one_hot_probs("MH12AB1234"), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", "_")
+    text, confs = decode_india(
+        _one_hot_probs("MH12AB1234"), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", "_"
+    )
     assert text == "MH12AB1234"
     assert len(confs) == len(text)
     assert all(c > 0.5 for c in confs)
 
 
 def test_decode_india_bh_series():
-    text, _ = decode_india(_one_hot_probs("22BH1234AA"), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", "_")
+    text, _ = decode_india(
+        _one_hot_probs("22BH1234AA"), "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", "_"
+    )
     assert text == "22BH1234AA"
 
 

@@ -71,7 +71,9 @@ def build_zone_node_map(
         zid = zone["id"]
         if "h3_cell" in zone:
             cell = zone["h3_cell"]
-            lat, lng = h3.cell_to_latlng(h3.int_to_str(int(cell)) if isinstance(cell, int) else cell)
+            lat, lng = h3.cell_to_latlng(
+                h3.int_to_str(int(cell)) if isinstance(cell, int) else cell
+            )
             # assign nodes nearest centroid
             dists = []
             for n in nodes:
@@ -129,7 +131,9 @@ def schedule_trips(
         except nx.NetworkXNoPath:
             t += timedelta(minutes=5)
             continue
-        plans.append(TripPlan(vehicle=vehicle, origin_node=origin, dest_node=dest, depart_at=t, path=path))
+        plans.append(
+            TripPlan(vehicle=vehicle, origin_node=origin, dest_node=dest, depart_at=t, path=path)
+        )
         t += timedelta(minutes=int(rng.integers(2, 8)))
     plans.sort(key=lambda p: p.depart_at)
     return plans

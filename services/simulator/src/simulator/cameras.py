@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 import networkx as nx
@@ -44,7 +45,9 @@ class Camera:
         }
 
 
-def _pick_out_edge(graph: nx.MultiDiGraph, node: int | str, rng: np.random.Generator) -> tuple[int | str, int | str]:
+def _pick_out_edge(
+    graph: nx.MultiDiGraph, node: int | str, rng: np.random.Generator
+) -> tuple[int | str, int | str]:
     successors = list(graph.successors(node))
     if not successors:
         predecessors = list(graph.predecessors(node))
@@ -125,7 +128,7 @@ def compute_camera_pairs(
             except nx.NetworkXNoPath:
                 continue
             dist = 0.0
-            for u, v in zip(path[:-1], path[1:]):
+            for u, v in pairwise(path):
                 edge_data = graph.get_edge_data(u, v) or {}
                 key = min(edge_data) if edge_data else 0
                 dist += float(edge_data[key].get("length_m", edge_data[key].get("length", 100.0)))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 import clickhouse_connect
 import redis.asyncio as aioredis
@@ -70,7 +70,9 @@ async def get_current_user(
     try:
         user = decode_access_token(credentials.credentials)
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
 
     if not user.id:
         result = await session.execute(select(User).where(User.username == user.username))
@@ -98,7 +100,7 @@ def require_roles(*allowed: Role) -> Callable:
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 UserDep = Annotated[UserContext, Depends(get_current_user)]
-ClickHouseDep = Annotated[object, Depends(get_clickhouse)]
+ClickHouseDep = Annotated[Any, Depends(get_clickhouse)]
 RedisDep = Annotated[aioredis.Redis, Depends(get_redis)]
 MinioDep = Annotated[Minio, Depends(get_minio)]
 

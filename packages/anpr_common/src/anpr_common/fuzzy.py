@@ -28,9 +28,7 @@ def _is_confusion(a: str, b: str) -> bool:
     au, bu = a.upper(), b.upper()
     if DIGIT_TO_LETTER.get(au) == bu or LETTER_TO_DIGIT.get(au) == bu:
         return True
-    if DIGIT_TO_LETTER.get(bu) == au or LETTER_TO_DIGIT.get(bu) == au:
-        return True
-    return False
+    return DIGIT_TO_LETTER.get(bu) == au or LETTER_TO_DIGIT.get(bu) == au
 
 
 def weighted_edit_distance(a: str, b: str) -> float:

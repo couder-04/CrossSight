@@ -23,7 +23,9 @@ def _aware(value: datetime | None) -> datetime | None:
     return value
 
 
-async def apply_stale_job_recovery(session, *, now: datetime | None = None, stale_minutes: int = 30) -> int:
+async def apply_stale_job_recovery(
+    session, *, now: datetime | None = None, stale_minutes: int = 30
+) -> int:
     """Mark processing rows older than ``stale_minutes`` as failed and retryable."""
     moment = _aware(now) or datetime.now(UTC)
     cutoff = moment - timedelta(minutes=stale_minutes)

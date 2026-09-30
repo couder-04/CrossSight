@@ -78,7 +78,7 @@ def reads_from_frames(
     for index, frame in enumerate(frames):
         try:
             found = recognize(frame)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("frame OCR failed: %s", exc)
             continue
         plate = str(found.get("plate") or "")

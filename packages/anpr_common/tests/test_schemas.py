@@ -1,20 +1,19 @@
 """Schema round-trip and JSON Schema export tests."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from anpr_common.schemas import Alert, FlowWindow, PlateRead, export_json_schemas
+from pydantic import ValidationError
 
 
 def test_plate_read_roundtrip():
     pr = PlateRead(
         event_id=uuid4(),
         camera_id="cam-001",
-        ts=datetime.now(timezone.utc),
+        ts=datetime.now(UTC),
         plate_raw="MH 12 DE 1433",
         plate_norm="mh12de1433",
         plate_valid=True,
@@ -50,8 +49,8 @@ def test_alert_roundtrip():
 def test_flow_window_roundtrip():
     fw = FlowWindow(
         camera_id="cam-001",
-        window_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        window_end=datetime(2024, 1, 1, 0, 5, tzinfo=timezone.utc),
+        window_start=datetime(2024, 1, 1, tzinfo=UTC),
+        window_end=datetime(2024, 1, 1, 0, 5, tzinfo=UTC),
         counts_by_class={"car": 10},
         volume=10,
     )
@@ -63,7 +62,7 @@ def test_bbox_must_be_four_floats():
     with pytest.raises(ValidationError):
         PlateRead(
             camera_id="cam-001",
-            ts=datetime.now(timezone.utc),
+            ts=datetime.now(UTC),
             plate_raw="MH12DE1433",
             plate_norm="MH12DE1433",
             plate_valid=True,

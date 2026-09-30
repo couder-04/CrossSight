@@ -30,7 +30,9 @@ def _window(start: datetime | None, end: datetime | None) -> tuple[datetime, dat
     if finish.tzinfo is None:
         finish = finish.replace(tzinfo=UTC)
     if begin >= finish:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start must be before end")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="start must be before end"
+        )
     return begin, finish
 
 
@@ -42,7 +44,10 @@ def _query(ch, sql: str, parameters: dict) -> list[tuple]:
     try:
         result = ch.query(sql, parameters=parameters)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"analytics store unavailable: {exc}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"analytics store unavailable: {exc}",
+        ) from exc
     return list(result.result_rows)
 
 
@@ -87,7 +92,13 @@ async def _cameras(session) -> list[dict]:
     return rows
 
 
-def _health_for(cameras: list[dict], last_reads: dict[str, datetime], window_counts: dict[str, int], now: datetime, settings) -> list[dict]:
+def _health_for(
+    cameras: list[dict],
+    last_reads: dict[str, datetime],
+    window_counts: dict[str, int],
+    now: datetime,
+    settings,
+) -> list[dict]:
     thresholds = CameraHealthThresholds(
         stale_after_s=settings.health_stale_s,
         offline_after_s=settings.health_offline_s,
@@ -116,7 +127,9 @@ def _health_for(cameras: list[dict], last_reads: dict[str, datetime], window_cou
                 "lng": cam["lng"],
                 "camera_status": cam["status"],
                 **classified,
-                "last_read": classified["last_read"].isoformat() if classified["last_read"] else None,
+                "last_read": classified["last_read"].isoformat()
+                if classified["last_read"]
+                else None,
             }
         )
     return output
@@ -161,8 +174,16 @@ async def camera_health(
     cameras = await _cameras(session)
     last, counts = _read_stats(ch, begin, finish)
     rows = _health_for(cameras, last, counts, finish, settings)
-    summary = {state: sum(1 for row in rows if row["state"] == state) for state in ("HEALTHY", "DEGRADED", "STALE", "OFFLINE")}
-    return {"from": begin.isoformat(), "to": finish.isoformat(), "summary": summary, "cameras": rows}
+    summary = {
+        state: sum(1 for row in rows if row["state"] == state)
+        for state in ("HEALTHY", "DEGRADED", "STALE", "OFFLINE")
+    }
+    return {
+        "from": begin.isoformat(),
+        "to": finish.isoformat(),
+        "summary": summary,
+        "cameras": rows,
+    }
 
 
 @router.post("/cameras/health/scan")
@@ -195,7 +216,9 @@ async def scan_camera_health(
             AlertRow(
                 id=uuid4(),
                 type=AlertType.camera_health.value,
-                severity=AlertSeverity.high.value if row["state"] == "OFFLINE" else AlertSeverity.medium.value,
+                severity=AlertSeverity.high.value
+                if row["state"] == "OFFLINE"
+                else AlertSeverity.medium.value,
                 plate_norm=plate,
                 camera_ids=[row["camera_id"]],
                 evidence={
@@ -295,7 +318,12 @@ async def camera_od(
             cam = cameras.get(cell[end_name])
             cell[f"{end_name}_lat"] = cam["lat"] if cam else None
             cell[f"{end_name}_lng"] = cam["lng"] if cam else None
-    return {"from": begin.isoformat(), "to": finish.isoformat(), "k_anonymity": settings.od_k_anon, "cells": cells}
+    return {
+        "from": begin.isoformat(),
+        "to": finish.isoformat(),
+        "k_anonymity": settings.od_k_anon,
+        "cells": cells,
+    }
 
 
 @router.get("/travel")
@@ -406,7 +434,12 @@ async def dwell(
             }
             for row in stored
         ]
-        return {"from": begin.isoformat(), "to": finish.isoformat(), "source": "dwell_events", "sessions": sessions}
+        return {
+            "from": begin.isoformat(),
+            "to": finish.isoformat(),
+            "source": "dwell_events",
+            "sessions": sessions,
+        }
     read_where = "ts >= {start:DateTime} AND ts < {end:DateTime}"
     if camera_id:
         read_where += " AND camera_id = {camera:String}"
@@ -441,7 +474,12 @@ async def dwell(
     for session_row in sessions:
         session_row["entry_ts"] = session_row["entry_ts"].isoformat()
         session_row["exit_ts"] = session_row["exit_ts"].isoformat()
-    return {"from": begin.isoformat(), "to": finish.isoformat(), "source": "anpr_reads", "sessions": sessions}
+    return {
+        "from": begin.isoformat(),
+        "to": finish.isoformat(),
+        "source": "anpr_reads",
+        "sessions": sessions,
+    }
 
 
 @router.get("/vehicles")
@@ -506,7 +544,9 @@ async def vehicle_classes(
         "from": begin.isoformat(),
         "to": finish.isoformat(),
         **summary,
-        "trend": [{"hour": str(row[0]), "vehicle_class": row[1], "count": int(row[2])} for row in trend],
+        "trend": [
+            {"hour": str(row[0]), "vehicle_class": row[1], "count": int(row[2])} for row in trend
+        ],
     }
 
 
@@ -570,7 +610,15 @@ async def recent_reads(
                 }
             )
         else:
-            item.update({"track_id": None, "bbox": [], "crop_key": row[5], "lane": row[6], "direction": row[7]})
+            item.update(
+                {
+                    "track_id": None,
+                    "bbox": [],
+                    "crop_key": row[5],
+                    "lane": row[6],
+                    "direction": row[7],
+                }
+            )
         reads.append(item)
     return {"reads": reads}
 
@@ -630,7 +678,14 @@ async def investigation(
         .order_by(AlertRow.created_at.desc())
         .limit(50)
     )
-    session.add(audit_row(user, "investigation_query", plate_norm=plate_norm, params={"from": begin.isoformat(), "to": finish.isoformat()}))
+    session.add(
+        audit_row(
+            user,
+            "investigation_query",
+            plate_norm=plate_norm,
+            params={"from": begin.isoformat(), "to": finish.isoformat()},
+        )
+    )
     await session.commit()
     return {
         "plate_norm": plate_norm,
@@ -660,7 +715,9 @@ async def overview(
 ) -> dict[str, Any]:
     cameras = await _cameras(session)
     open_alerts = await session.execute(
-        select(AlertRow).where(AlertRow.status.in_(["new", "reviewing", "acknowledged", "dispatched"]))
+        select(AlertRow).where(
+            AlertRow.status.in_(["new", "reviewing", "acknowledged", "dispatched"])
+        )
     )
     alert_rows = list(open_alerts.scalars())
     health_error = None

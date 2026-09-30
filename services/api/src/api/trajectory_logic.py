@@ -55,7 +55,7 @@ def dominant_attribute(values: list[str | None]) -> str | None:
         counts[v] = counts.get(v, 0) + 1
     if not counts:
         return None
-    return max(counts, key=counts.get)
+    return max(counts, key=lambda item: counts[item])
 
 
 def merge_fuzzy_reads(
@@ -174,9 +174,7 @@ def shortest_feasible_path(
         path = nx.shortest_path(graph, camera_a, camera_b, weight="weight")
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         return None
-    total = sum(
-        graph[path[i]][path[i + 1]]["weight"] for i in range(len(path) - 1)
-    )
+    total = sum(graph[path[i]][path[i + 1]]["weight"] for i in range(len(path) - 1))
     if total > available_s:
         return None
     return path, total
@@ -210,7 +208,6 @@ def build_trajectory_legs(
             continue
 
         if is_adjacent(a.camera_id, b.camera_id, pairs):
-            dist = pair_distance(a.camera_id, b.camera_id, pairs) or 0.0
             legs.append(
                 Leg(
                     from_camera=a.camera_id,
@@ -230,7 +227,7 @@ def build_trajectory_legs(
 
         path_result = shortest_feasible_path(a.camera_id, b.camera_id, delta_s, graph)
         if path_result is None:
-            dist = pair_distance(a.camera_id, b.camera_id, pairs)
+            hop = pair_distance(a.camera_id, b.camera_id, pairs)
             eta = delta_s if delta_s > 0 else 0.0
             legs.append(
                 Leg(
@@ -243,7 +240,7 @@ def build_trajectory_legs(
                     observed=False,
                     feasible=False,
                     eta_s=eta,
-                    impossible_hop=impossible or dist is None,
+                    impossible_hop=impossible or hop is None,
                     path_cameras=[a.camera_id, b.camera_id],
                 )
             )

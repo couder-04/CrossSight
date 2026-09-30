@@ -5,10 +5,12 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime
+from typing import Any, cast
 
 from anpr_common.grammar import normalize_plate
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 
 from api.db import WatchlistEntry
 from api.deps import OperatorUserDep, SessionDep
@@ -43,7 +45,9 @@ async def add_watchlist_entry(
     plate = normalize_plate(body.plate_norm).norm or body.plate_norm.upper().replace(" ", "")
     existing = await session.get(WatchlistEntry, plate)
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Plate already on watchlist")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Plate already on watchlist"
+        )
     entry = WatchlistEntry(
         plate_norm=plate,
         reason=body.reason,
@@ -65,7 +69,7 @@ async def remove_watchlist_entry(
 ) -> None:
     plate = normalize_plate(plate_norm).norm or plate_norm.upper().replace(" ", "")
     result = await session.execute(delete(WatchlistEntry).where(WatchlistEntry.plate_norm == plate))
-    if result.rowcount == 0:
+    if cast(CursorResult[Any], result).rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plate not on watchlist")
     await session.commit()
 

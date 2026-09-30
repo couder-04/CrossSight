@@ -533,9 +533,7 @@ class DefaultRuleContext:
         conf = float(data.get("confidence", "0"))
         return data["camera_id"], ts, conf
 
-    async def convoy_peers(
-        self, plate_norm: str, camera_id: str, ts: datetime
-    ) -> set[str]:
+    async def convoy_peers(self, plate_norm: str, camera_id: str, ts: datetime) -> set[str]:
         """Find co-travellers using plate→camera indexes (not O(|cameras|))."""
         zkey = f"convoy:cam:{camera_id}"
         min_score = ts.timestamp() - CONVOY_TIME_WINDOW_SEC

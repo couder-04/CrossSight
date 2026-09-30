@@ -120,9 +120,7 @@ async def test_wrong_way_opposite_direction():
 async def test_geofence_outside_active_hours():
     rule = GeofenceRule()
     ctx = _ctx(
-        restricted_zone=AsyncMock(
-            return_value=("zone-r1", {"mon": [{"start": 8, "end": 18}]})
-        )
+        restricted_zone=AsyncMock(return_value=("zone-r1", {"mon": [{"start": 8, "end": 18}]}))
     )
     read = _read(ts=datetime(2025, 6, 2, 22, 0, tzinfo=UTC))
     alerts = await rule.evaluate(read, ctx)
@@ -227,7 +225,9 @@ async def test_cloned_plate_respects_camera_speed_limit():
         cameras=cameras,
         settings=SimpleNamespace(max_urban_speed_kmh=80.0),
         pair_distances={("cam-1", "cam-2"): 1500.0},
-        last_seen=AsyncMock(return_value=("cam-1", datetime(2025, 6, 1, 11, 59, 24, tzinfo=UTC), 0.95)),
+        last_seen=AsyncMock(
+            return_value=("cam-1", datetime(2025, 6, 1, 11, 59, 24, tzinfo=UTC), 0.95)
+        ),
     )
     alerts = await ClonedPlateRule().evaluate(_read(camera="cam-2"), ctx)
     assert alerts == []

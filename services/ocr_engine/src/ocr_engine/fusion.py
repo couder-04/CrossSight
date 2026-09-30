@@ -43,7 +43,11 @@ def _align_to_reference(ref: str, other: str) -> list[tuple[str | None, str | No
     i, j = len(ref), len(other)
     pairs_rev: list[tuple[str | None, str | None]] = []
     while i > 0 or j > 0:
-        if i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + (0 if ref[i - 1] == other[j - 1] else 1):
+        if (
+            i > 0
+            and j > 0
+            and dp[i][j] == dp[i - 1][j - 1] + (0 if ref[i - 1] == other[j - 1] else 1)
+        ):
             pairs_rev.append((ref[i - 1], other[j - 1]))
             i -= 1
             j -= 1

@@ -69,9 +69,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, alias="API_PORT")
     cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
 
-    ocr_backend: Literal["plateocr", "legacy"] = Field(
-        default="plateocr", alias="OCR_BACKEND"
-    )
+    ocr_backend: Literal["plateocr", "legacy"] = Field(default="plateocr", alias="OCR_BACKEND")
     plate_det_weights: str = Field(default="", alias="PLATE_DET_WEIGHTS")
     parseq_weights: str = Field(default="", alias="PARSEEQ_WEIGHTS")
     ocr_camera_id: str = Field(default="cam-demo", alias="OCR_CAMERA_ID")

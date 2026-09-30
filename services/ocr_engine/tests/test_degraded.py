@@ -14,7 +14,10 @@ def test_validate_plate_weights_exits_on_missing():
         capture_output=True,
         text=True,
         check=False,
-        env={**__import__("os").environ, "PYTHONPATH": "services/ocr_engine/src:packages/anpr_common/src"},
+        env={
+            **__import__("os").environ,
+            "PYTHONPATH": "services/ocr_engine/src:packages/anpr_common/src",
+        },
     )
     assert result.returncode == 1
     assert "PLATE_DET_WEIGHTS" in result.stderr or "PLATE_DET_WEIGHTS" in result.stdout
@@ -33,6 +36,9 @@ def test_validate_plate_weights_exits_on_not_found():
         capture_output=True,
         text=True,
         check=False,
-        env={**__import__("os").environ, "PYTHONPATH": "services/ocr_engine/src:packages/anpr_common/src"},
+        env={
+            **__import__("os").environ,
+            "PYTHONPATH": "services/ocr_engine/src:packages/anpr_common/src",
+        },
     )
     assert result.returncode == 1

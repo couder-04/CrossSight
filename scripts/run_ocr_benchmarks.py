@@ -53,6 +53,7 @@ def run_eval(
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     elapsed = time.perf_counter() - t0
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -177,7 +178,9 @@ def main() -> int:
         lines.append(f"- OCR model: `{run['ocr']}`")
         lines.append(f"- Plate format: `{run['plate_format']}`")
         lines.append("")
-        lines.append("| set | plates | found | exact | exact (O=0) | char acc | extra | ms med | ms p95 |")
+        lines.append(
+            "| set | plates | found | exact | exact (O=0) | char acc | extra | ms med | ms p95 |"
+        )
         lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
         for r in run["rows"]:
             lines.append(
@@ -198,6 +201,7 @@ def main() -> int:
         if run["name"] == "openalpr_global" and run["rows"]:
             # Combined exact weighted by plates
             tot = sum(r["plates"] for r in run["rows"])
+
             # parse percent strings like 90.8%
             def pct(s: str) -> float:
                 return float(s.strip("%")) / 100.0
@@ -206,7 +210,7 @@ def main() -> int:
             found = sum(r["plates"] * pct(r["found"]) for r in run["rows"]) / tot if tot else 0
             claim_lines.append(
                 f"- **OpenALPR EU+BR+US** with `cct-s-v2-global-model`: "
-                f"**{exact*100:.1f}%** exact plate match, **{found*100:.1f}%** plate found "
+                f"**{exact * 100:.1f}%** exact plate match, **{found * 100:.1f}%** plate found "
                 f"(n={tot})."
             )
         if run["name"] == "india_v1_format":

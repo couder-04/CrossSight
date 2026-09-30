@@ -42,9 +42,7 @@ def summarize_ocr(pairs: list[tuple[str, str]]) -> dict:
     exact = sum(1 for pred, gt in pairs if exact_match(pred, gt))
     char = sum(character_accuracy(pred, gt) for pred, gt in pairs) / len(pairs)
     failures = [
-        {"prediction": pred, "ground_truth": gt}
-        for pred, gt in pairs
-        if not exact_match(pred, gt)
+        {"prediction": pred, "ground_truth": gt} for pred, gt in pairs if not exact_match(pred, gt)
     ][:25]
     return {
         "n": len(pairs),

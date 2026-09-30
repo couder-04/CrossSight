@@ -97,6 +97,7 @@ def classify_link(
         and min_travel_s <= elapsed_s <= max_travel_s
     )
     if topology_ok and in_window and class_ok and color_ok:
+        assert elapsed_s is not None and min_travel_s is not None and max_travel_s is not None
         span = max(max_travel_s - min_travel_s, 1.0)
         closeness = 1.0 - min(abs(elapsed_s - (min_travel_s + max_travel_s) / 2) / span, 1.0)
         return {

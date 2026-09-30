@@ -85,7 +85,7 @@ def render_plate(
         tw = bbox[2] - bbox[0]
         x = (width - tw) // 2
         draw.text((x, y), line, fill=(20, 20, 20), font=font)
-        y += (bbox[3] - bbox[1]) + 8
+        y += int(bbox[3] - bbox[1]) + 8
 
     # Blue IND strip
     draw.rectangle([0, 0, 18, height if not two_row else 140], fill=(0, 60, 160))
@@ -108,7 +108,11 @@ def augmentation_pipeline(tag: str, rng: random.Random) -> A.Compose:
     if tag == "night":
         transforms.append(A.RandomBrightnessContrast(brightness_limit=(-0.6, -0.2), p=0.9))
     if tag == "dirty":
-        transforms.append(A.CoarseDropout(num_holes_range=(4, 8), hole_height_range=(8, 12), hole_width_range=(8, 12), p=0.7))
+        transforms.append(
+            A.CoarseDropout(
+                num_holes_range=(4, 8), hole_height_range=(8, 12), hole_width_range=(8, 12), p=0.7
+            )
+        )
     if tag == "damaged":
         transforms.append(A.GridDropout(ratio=0.15, p=0.6))
     if tag == "day":
@@ -150,7 +154,9 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("out/synth"))
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--font", type=str, default=None)
-    parser.add_argument("--eval-fixture", type=Path, default=None, help="Also write eval fixture here")
+    parser.add_argument(
+        "--eval-fixture", type=Path, default=None, help="Also write eval fixture here"
+    )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     rng = random.Random(args.seed)

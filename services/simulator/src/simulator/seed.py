@@ -61,7 +61,6 @@ def build_zones(
     settings: Settings,
     seed: int = 11,
 ) -> list[dict[str, Any]]:
-    rng = np.random.default_rng(seed)
     cells: set[str] = set()
     for cam in cameras:
         cells.add(h3.int_to_str(latlng_to_h3(cam.lat, cam.lng, settings.h3_od_res)))
@@ -113,7 +112,10 @@ def build_zones(
             "kind": "restricted",
             "wkt": wkt,
             "active_hours": {"start": "22:00", "end": "06:00"},
-            "centroid": (float(np.mean([c.lat for c in tail])), float(np.mean([c.lng for c in tail]))),
+            "centroid": (
+                float(np.mean([c.lat for c in tail])),
+                float(np.mean([c.lng for c in tail])),
+            ),
         }
     )
     return zones
@@ -229,10 +231,9 @@ def seed_watchlist(cur, plates: list[str], redis_client: redis.Redis | None = No
             """,
             (plate, "Scenario watchlist seed", "high", "simulator"),
         )
-    if redis_client is not None:
-        if plates:
-            redis_client.delete("watchlist:set")
-            redis_client.sadd("watchlist:set", *plates)
+    if redis_client is not None and plates:
+        redis_client.delete("watchlist:set")
+        redis_client.sadd("watchlist:set", *plates)
 
 
 def run_seed(
@@ -254,7 +255,7 @@ def run_seed(
     redis_client: redis.Redis | None = None
     try:
         redis_client = connect_redis(settings)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Redis unavailable during seed (%s)", exc)
 
     try:

@@ -153,7 +153,9 @@ def sessionize_dwell(
             same = row["camera_id"] == current["camera_id"]
             if same and 0 <= gap <= thresholds.gap_s:
                 current["exit_ts"] = row["ts"]
-                current["confidence"] = max(current["confidence"], float(row.get("confidence") or 0))
+                current["confidence"] = max(
+                    current["confidence"], float(row.get("confidence") or 0)
+                )
                 if row.get("crop_key"):
                     current["crop_key"] = row["crop_key"]
                 continue

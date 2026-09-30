@@ -10,10 +10,46 @@ PlateFormat = Literal["standard", "bh", "nonstandard"]
 
 STATE_CODES: frozenset[str] = frozenset(
     {
-        "AN", "AP", "AR", "AS", "BR", "CG", "CH", "DD", "DL", "DN",
-        "GA", "GJ", "HP", "HR", "JH", "JK", "KA", "KL", "LA", "LD",
-        "MH", "ML", "MN", "MP", "MZ", "NL", "OD", "OR", "PB", "PY",
-        "RJ", "SK", "TG", "TN", "TR", "TS", "UA", "UK", "UP", "WB",
+        "AN",
+        "AP",
+        "AR",
+        "AS",
+        "BR",
+        "CG",
+        "CH",
+        "DD",
+        "DL",
+        "DN",
+        "GA",
+        "GJ",
+        "HP",
+        "HR",
+        "JH",
+        "JK",
+        "KA",
+        "KL",
+        "LA",
+        "LD",
+        "MH",
+        "ML",
+        "MN",
+        "MP",
+        "MZ",
+        "NL",
+        "OD",
+        "OR",
+        "PB",
+        "PY",
+        "RJ",
+        "SK",
+        "TG",
+        "TN",
+        "TR",
+        "TS",
+        "UA",
+        "UK",
+        "UP",
+        "WB",
     }
 )
 
@@ -44,9 +80,7 @@ def _validate_bh(norm: str) -> bool:
     return bool(BH_RE.match(norm))
 
 
-def _apply_at_positions(
-    norm: str, letter_pos: set[int]
-) -> tuple[str, list[tuple[int, str, str]]]:
+def _apply_at_positions(norm: str, letter_pos: set[int]) -> tuple[str, list[tuple[int, str, str]]]:
     chars = list(norm)
     corrections: list[tuple[int, str, str]] = []
     for i, ch in enumerate(chars):

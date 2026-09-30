@@ -53,7 +53,7 @@ def _parse_dt(value: str, label: str) -> tuple[datetime | None, str | None]:
     if not value:
         return None, None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")), None
+        return datetime.fromisoformat(value), None
     except ValueError:
         return None, f"{label} is not an ISO date"
 
@@ -165,10 +165,16 @@ def preview_cameras(text: str, *, fmt: str, existing: set[str]) -> dict:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValueError(f"malformed json: {exc}") from exc
-        rows = payload if isinstance(payload, list) else payload.get("cameras") if isinstance(payload, dict) else None
+        rows = (
+            payload
+            if isinstance(payload, list)
+            else payload.get("cameras")
+            if isinstance(payload, dict)
+            else None
+        )
         if not isinstance(rows, list):
             raise ValueError("camera config must be a list or {cameras: []}")
-        dict_rows = []
+        dict_rows: list[dict] = []
         for row in rows:
             if not isinstance(row, dict):
                 dict_rows.append({})
@@ -253,7 +259,7 @@ def preview_zones(text: str) -> dict:
         raise ValueError(f"malformed json: {exc}") from exc
     features = doc.get("features") if isinstance(doc, dict) else None
     if not isinstance(features, list):
-        raise ValueError("expected a GeoJSON FeatureCollection")
+        raise ValueError("expected a GeoJSON FeatureCollection")  # noqa: TRY004
     valid: list[dict] = []
     invalid: list[dict] = []
     seen: set[str] = set()
@@ -261,9 +267,9 @@ def preview_zones(text: str) -> dict:
     for index, feature in enumerate(features, start=1):
         errors = _zone_errors(feature)
         props = feature.get("properties") if isinstance(feature, dict) else {}
-        zone_id = ""
-        if isinstance(props, dict):
-            zone_id = str(props.get("id") or props.get("zone_id") or "")
+        if not isinstance(props, dict):
+            props = {}
+        zone_id = str(props.get("id") or props.get("zone_id") or "")
         if errors:
             invalid.append({"row": index, "id": zone_id, "errors": errors})
             continue
@@ -287,7 +293,8 @@ def _zone_errors(feature: object) -> list[str]:
     if not isinstance(feature, dict):
         return ["feature must be an object"]
     errors: list[str] = []
-    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+    raw_props = feature.get("properties")
+    props = raw_props if isinstance(raw_props, dict) else {}
     zone_id = str(props.get("id") or props.get("zone_id") or "")
     if not zone_id:
         errors.append("feature id is required")

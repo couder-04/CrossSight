@@ -2,7 +2,9 @@
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
+from anpr_common.config import Settings
 from anpr_common.schemas import PlateFormat, PlateRead, VehicleClass
 from workers.analytics import AnalyticsEngine
 from workers.db import CameraPair
@@ -32,7 +34,7 @@ def _engine() -> AnalyticsEngine:
         stopped_incident_s=180,
         stopped_gap_s=90,
     )
-    engine = AnalyticsEngine(settings)
+    engine = AnalyticsEngine(cast(Settings, settings))
     engine.set_topology(
         [CameraPair("cam-a", "cam-b", 1000.0, True)],
         {},

@@ -9,6 +9,7 @@ import os
 import signal
 from collections.abc import Sequence
 from datetime import UTC
+from typing import Any
 
 import orjson
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -117,7 +118,7 @@ class AlertsWorker:
         self._health = HealthServer("alerts", self.health_port, ready_check=self._ready)
         self._stop: asyncio.Event | None = None
         self._engine: AlertEngine | None = None
-        self._redis = None
+        self._redis: Any | None = None
         self._pg_pool = None
         self._ctx: DefaultRuleContext | None = None
         self._ready_flag = False

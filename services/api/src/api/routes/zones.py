@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
 from geoalchemy2 import WKTElement
 from geoalchemy2.functions import ST_AsGeoJSON
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 
 from api.db import Zone
 from api.deps import AdminUserDep, SessionDep, UserDep
@@ -88,7 +90,7 @@ async def update_zone(
 @router.delete("/{zone_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_zone(zone_id: str, session: SessionDep, _admin: AdminUserDep) -> None:
     result = await session.execute(delete(Zone).where(Zone.id == zone_id))
-    if result.rowcount == 0:
+    if cast(CursorResult[Any], result).rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found")
     await session.commit()
 
@@ -103,4 +105,6 @@ def _geojson_to_wkt(geojson: dict) -> WKTElement:
             rings.append(f"({pts})")
         wkt = f"POLYGON({', '.join(rings)})"
         return WKTElement(wkt, srid=4326)
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported GeoJSON geometry")
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported GeoJSON geometry"
+    )

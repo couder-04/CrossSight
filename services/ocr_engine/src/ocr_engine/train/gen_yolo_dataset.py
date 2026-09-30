@@ -19,7 +19,7 @@ def _scene(rng: random.Random, size: int = 640) -> np.ndarray:
     """Random asphalt-like background with simple car-body rectangle."""
     bg = np.full((size, size, 3), rng.randint(40, 90), dtype=np.uint8)
     noise = np.random.default_rng(rng.randint(0, 10_000)).integers(0, 25, bg.shape, dtype=np.uint8)
-    bg = cv2.add(bg, noise)
+    bg = np.asarray(cv2.add(bg, noise), dtype=np.uint8)
     # faux vehicle body
     color = (rng.randint(20, 200), rng.randint(20, 200), rng.randint(20, 200))
     x1, y1 = rng.randint(40, 120), rng.randint(160, 280)

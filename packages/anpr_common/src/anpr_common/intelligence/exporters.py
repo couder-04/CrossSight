@@ -55,7 +55,9 @@ def rows_to_pdf(title: str, meta: list[str], sections: list[tuple[str, list[str]
         lines.extend(body or ["-"])
         lines.append("")
     page_size = 46
-    pages = [lines[offset : offset + page_size] for offset in range(0, max(len(lines), 1), page_size)]
+    pages = [
+        lines[offset : offset + page_size] for offset in range(0, max(len(lines), 1), page_size)
+    ]
     objects: list[bytes] = []
 
     def add(payload: bytes) -> int:
@@ -70,7 +72,9 @@ def rows_to_pdf(title: str, meta: list[str], sections: list[tuple[str, list[str]
             commands.append(f"({_pdf_escape(line)}) '")
         commands.append("ET")
         stream = "\n".join(commands).encode("latin-1", errors="replace")
-        content_ids.append(add(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream"))
+        content_ids.append(
+            add(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
+        )
     page_ids: list[int] = []
     for content_num in content_ids:
         page_ids.append(
@@ -84,7 +88,9 @@ def rows_to_pdf(title: str, meta: list[str], sections: list[tuple[str, list[str]
     kids = " ".join(f"{pid} 0 R" for pid in page_ids)
     pages_id = add(f"<< /Type /Pages /Count {len(page_ids)} /Kids [{kids}] >>".encode())
     for pid in page_ids:
-        objects[pid - 1] = objects[pid - 1].replace(b"/Parent PAGES 0 R", f"/Parent {pages_id} 0 R".encode())
+        objects[pid - 1] = objects[pid - 1].replace(
+            b"/Parent PAGES 0 R", f"/Parent {pages_id} 0 R".encode()
+        )
     catalog_id = add(f"<< /Type /Catalog /Pages {pages_id} 0 R >>".encode())
 
     out = io.BytesIO()
@@ -105,7 +111,9 @@ def rows_to_pdf(title: str, meta: list[str], sections: list[tuple[str, list[str]
     return out.getvalue()
 
 
-def clip_window(event_offset_s: float, before_s: float, after_s: float, duration_s: float) -> tuple[float, float] | None:
+def clip_window(
+    event_offset_s: float, before_s: float, after_s: float, duration_s: float
+) -> tuple[float, float] | None:
     if before_s < 0 or after_s < 0 or duration_s <= 0:
         return None
     start = max(0.0, event_offset_s - before_s)

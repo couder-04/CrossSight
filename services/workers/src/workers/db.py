@@ -81,7 +81,9 @@ class ClickHouseClient:
         ]
         if self.extended:
             columns.extend(["track_id", "bbox"])
-        data = [[row.get(c) if c in {"track_id", "bbox"} else row[c] for c in columns] for row in rows]
+        data = [
+            [row.get(c) if c in {"track_id", "bbox"} else row[c] for c in columns] for row in rows
+        ]
         self._client.insert("anpr_reads", data, column_names=columns)
 
     def insert_flow_5min(self, rows: list[dict[str, Any]]) -> None:
@@ -259,7 +261,7 @@ async def create_pg_pool(settings: Settings | None = None) -> asyncpg.Pool:
 async def load_dwell_overrides(pool: asyncpg.Pool) -> dict[str, dict]:
     try:
         rows = await pool.fetch("SELECT id, ops_config FROM cameras")
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
     overrides: dict[str, dict] = {}
     for row in rows:
@@ -288,7 +290,9 @@ async def load_cameras(pool: asyncpg.Pool) -> dict[str, CameraInfo]:
             heading_deg=float(r["heading_deg"]),
             allowed_direction=r["allowed_direction"],
             lanes=int(r["lanes"] or 2),
-            speed_limit_kmh=float(r["speed_limit_kmh"]) if r["speed_limit_kmh"] is not None else None,
+            speed_limit_kmh=float(r["speed_limit_kmh"])
+            if r["speed_limit_kmh"] is not None
+            else None,
         )
         for r in rows
     }

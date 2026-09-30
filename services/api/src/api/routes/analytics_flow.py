@@ -107,7 +107,7 @@ def _segment_congestion(ch, at: datetime) -> list[dict[str, Any]]:
     try:
         baseline = ch.query(baseline_query)
         free_flow = {(r[0], r[1]): float(r[2]) for r in baseline.result_rows if r[2]}
-    except Exception:
+    except Exception:  # noqa: BLE001
         free_flow = {}
 
     segments_out = []
@@ -239,7 +239,7 @@ async def route_density(
             {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
             for row in result.result_rows
         ]
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Fallback without window functions: use segment_speed sample counts.
         fallback = """
             SELECT camera_a, camera_b, sum(sample_count) AS hops
@@ -268,7 +268,7 @@ async def route_density(
                     {"camera_a": row[0], "camera_b": row[1], "hop_count": int(row[2])}
                     for row in result.result_rows
                 ]
-            except Exception:
+            except Exception:  # noqa: BLE001
                 result = ch.query(
                     """
                     SELECT camera_a, camera_b, sum(sample_count) AS hops
@@ -301,7 +301,7 @@ def _camera_flow_baselines(ch) -> dict[str, float]:
     """
     try:
         return {row[0]: float(row[1]) for row in ch.query(query).result_rows}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return {}
 
 

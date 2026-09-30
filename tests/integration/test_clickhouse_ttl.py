@@ -15,7 +15,6 @@ pytestmark = pytest.mark.skipif(
 def test_anpr_reads_ttl_matches_raw_retention_days():
     import clickhouse_connect
     from anpr_common.config import get_settings
-
     from api.clickhouse_retention import apply_clickhouse_retention
 
     settings = get_settings()

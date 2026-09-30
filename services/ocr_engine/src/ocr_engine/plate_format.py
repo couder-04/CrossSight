@@ -12,10 +12,48 @@ from __future__ import annotations
 
 import numpy as np
 
-INDIA_STATE_CODES = (
-    "AN AP AR AS BR CG CH DD DL DN GA GJ HP HR JH JK KA KL LA LD MH ML MN MP MZ NL "
-    "OD OR PB PY RJ SK TG TN TR TS UA UK UP WB"
-).split()
+INDIA_STATE_CODES = [
+    "AN",
+    "AP",
+    "AR",
+    "AS",
+    "BR",
+    "CG",
+    "CH",
+    "DD",
+    "DL",
+    "DN",
+    "GA",
+    "GJ",
+    "HP",
+    "HR",
+    "JH",
+    "JK",
+    "KA",
+    "KL",
+    "LA",
+    "LD",
+    "MH",
+    "ML",
+    "MN",
+    "MP",
+    "MZ",
+    "NL",
+    "OD",
+    "OR",
+    "PB",
+    "PY",
+    "RJ",
+    "SK",
+    "TG",
+    "TN",
+    "TR",
+    "TS",
+    "UA",
+    "UK",
+    "UP",
+    "WB",
+]
 
 DIGITS = "0123456789"
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

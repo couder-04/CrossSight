@@ -62,7 +62,7 @@ def test_load_graph_uses_synthetic_when_osm_fails(settings, tmp_path, monkeypatc
     with patch("simulator.graph.download_osm_graph", return_value=None):
         g = load_graph(settings, force_synthetic=False)
     assert isinstance(g, nx.MultiDiGraph)
-    assert g.number_of_nodes() == SYNTHETIC_GRID_SIZE ** 2
+    assert g.number_of_nodes() == SYNTHETIC_GRID_SIZE**2
     assert cache_path(settings).exists()
 
 
@@ -75,4 +75,4 @@ def test_force_synthetic_skips_download(settings, tmp_path, monkeypatch):
     with patch("simulator.graph.download_osm_graph") as mock_dl:
         g = load_graph(settings, force_synthetic=True)
         mock_dl.assert_not_called()
-    assert g.number_of_nodes() == SYNTHETIC_GRID_SIZE ** 2
+    assert g.number_of_nodes() == SYNTHETIC_GRID_SIZE**2

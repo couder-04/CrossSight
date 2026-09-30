@@ -13,7 +13,7 @@ from workers.alerts.rules import (
     GeofenceRule,
     LoiteringRule,
 )
-from workers.db import CameraInfo, CameraPair
+from workers.db import CameraInfo
 
 
 def _read(
@@ -147,7 +147,9 @@ async def test_loitering_redis_backed_counts():
     base = datetime(2025, 6, 1, 12, 0, tzinfo=UTC)
     fired = False
     for i in range(6):
-        alerts = await rule.evaluate(_read(plate=plate, camera="cam-1", ts=base + timedelta(minutes=i * 5)), ctx)
+        alerts = await rule.evaluate(
+            _read(plate=plate, camera="cam-1", ts=base + timedelta(minutes=i * 5)), ctx
+        )
         if alerts:
             fired = True
             assert alerts[0].type == AlertType.loitering

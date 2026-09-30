@@ -125,9 +125,7 @@ def _iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return inter / np.clip(area_a[:, None] + area_b[None, :] - inter, 1e-9, None)
 
 
-def _linear_assignment(
-    cost: np.ndarray, thresh: float
-) -> tuple[np.ndarray, list[int], list[int]]:
+def _linear_assignment(cost: np.ndarray, thresh: float) -> tuple[np.ndarray, list[int], list[int]]:
     if cost.size == 0:
         return np.empty((0, 2), dtype=int), list(range(cost.shape[0])), list(range(cost.shape[1]))
     if lap is not None:
@@ -226,7 +224,9 @@ class ByteTracker:
     ) -> list[TrackOut]:
         self.frame_id += 1
         boxes = np.asarray([d[0] for d in detections], dtype=np.float64).reshape(-1, 4)
-        scores = np.asarray([d[1] for d in detections], dtype=np.float64) if detections else np.zeros(0)
+        scores = (
+            np.asarray([d[1] for d in detections], dtype=np.float64) if detections else np.zeros(0)
+        )
 
         high_m = scores >= self.track_thresh if len(scores) else np.zeros(0, dtype=bool)
         low_m = (~high_m) & (scores > 0.1) if len(scores) else np.zeros(0, dtype=bool)
@@ -241,7 +241,7 @@ class ByteTracker:
         matched_track_ids: set[int] = set()
         activated: list[_STrack] = []
 
-        matches, u_tr, u_det = self._associate(pool, high_boxes, self.match_thresh)
+        matches, u_tr, _u_det = self._associate(pool, high_boxes, self.match_thresh)
         for it, idet in matches:
             tr = pool[it]
             self._touch(tr, high_boxes[idet], float(high_scores[idet]), int(high_idx[idet]))
@@ -250,7 +250,7 @@ class ByteTracker:
 
         # Second association: unmatched tracks ↔ low-score dets
         remain = [pool[i] for i in u_tr]
-        matches2, u_tr2, _u_low = self._associate(remain, low_boxes, self.match_thresh_second)
+        matches2, _u_tr2, _u_low = self._associate(remain, low_boxes, self.match_thresh_second)
         for it, idet in matches2:
             tr = remain[it]
             self._touch(tr, low_boxes[idet], float(low_scores[idet]), int(low_idx[idet]))
@@ -272,7 +272,9 @@ class ByteTracker:
         for j in range(len(high_boxes)):
             if j in matched_high:
                 continue
-            activated.append(self._new_track(high_boxes[j], float(high_scores[j]), int(high_idx[j])))
+            activated.append(
+                self._new_track(high_boxes[j], float(high_scores[j]), int(high_idx[j]))
+            )
 
         self._tracked = [t for t in activated if t.time_since_update == 0]
         self._lost = lost_now
@@ -283,7 +285,7 @@ class ByteTracker:
             outs.append(
                 TrackOut(
                     track_id=t.track_id,
-                    bbox=(int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))),
+                    bbox=(round(x1), round(y1), round(x2), round(y2)),
                     score=float(t.score),
                     det_index=t.meta.get("det_index"),
                 )

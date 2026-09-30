@@ -80,7 +80,9 @@ class AnalyticsEngine:
         self.settings = settings
         self.windows: dict[tuple[str, int | None, datetime], CameraWindow] = {}
         self.plate_states: dict[str, PlateState] = {}
-        self.pair_samples: dict[tuple[str, str, datetime], list[tuple[float, float]]] = defaultdict(list)
+        self.pair_samples: dict[tuple[str, str, datetime], list[tuple[float, float]]] = defaultdict(
+            list
+        )
         self.pair_medians: dict[tuple[str, str], float] = {}
         self.adjacent_pairs: dict[tuple[str, str], float] = {}
         self.free_flow: dict[tuple[str, str], float] = {}
@@ -101,9 +103,7 @@ class AnalyticsEngine:
         free_flow: dict[tuple[str, str], float],
         baselines: dict[tuple[str, int], tuple[float, float]],
     ) -> None:
-        self.adjacent_pairs = {
-            (p.camera_a, p.camera_b): p.distance_m for p in pairs if p.adjacent
-        }
+        self.adjacent_pairs = {(p.camera_a, p.camera_b): p.distance_m for p in pairs if p.adjacent}
         self.free_flow = free_flow
         self.volume_baselines = baselines
 
@@ -216,9 +216,7 @@ class AnalyticsEngine:
             return _floor_window(self.watermark)
         return _floor_window(datetime.now(UTC))
 
-    def _maybe_emit_flow(
-        self, camera_id: str, lane: int | None, ws: datetime
-    ) -> list[FlowWindow]:
+    def _maybe_emit_flow(self, camera_id: str, lane: int | None, ws: datetime) -> list[FlowWindow]:
         now_ws = self._watermark_floor()
         if ws >= now_ws:
             return []
@@ -333,7 +331,9 @@ class AnalyticsEngine:
         self.pair_samples.clear()
         return rows
 
-    def detect_bottlenecks(self, flow_by_camera: dict[str, int], how: int | None = None) -> list[dict[str, Any]]:
+    def detect_bottlenecks(
+        self, flow_by_camera: dict[str, int], how: int | None = None
+    ) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
         how_key = how if how is not None else 0
         for (a, b), ci in self.segment_congestion.items():
@@ -403,7 +403,9 @@ class AnalyticsEngine:
             crop_key=read.crop_key,
             track_id=read.track_id,
         )
-        state, closed, _alert = advance_dwell(self.dwell_states.get(read.plate_norm), obs, thresholds)
+        state, closed, _alert = advance_dwell(
+            self.dwell_states.get(read.plate_norm), obs, thresholds
+        )
         self.dwell_states[read.plate_norm] = state
         if closed is None:
             return
@@ -433,7 +435,7 @@ class AnalyticsWorker:
         self._engine: AnalyticsEngine | None = None
         self._cameras: dict[str, CameraInfo] = {}
         self._ch: ClickHouseClient | None = None
-        self._redis = None
+        self._redis: Any | None = None
         self._pg_pool = None
 
     async def _init(self) -> None:
@@ -476,7 +478,9 @@ class AnalyticsWorker:
                         "lane": fw.lane,
                         "window_start": fw.window_start,
                         "counts_car": fw.counts_by_class.get(VehicleClass.car.value, 0),
-                        "counts_motorcycle": fw.counts_by_class.get(VehicleClass.motorcycle.value, 0),
+                        "counts_motorcycle": fw.counts_by_class.get(
+                            VehicleClass.motorcycle.value, 0
+                        ),
                         "counts_bus": fw.counts_by_class.get(VehicleClass.bus.value, 0),
                         "counts_truck": fw.counts_by_class.get(VehicleClass.truck.value, 0),
                         "counts_auto": fw.counts_by_class.get(VehicleClass.auto.value, 0),

@@ -67,7 +67,7 @@ class TrackState:
 
 
 def estimate_lane(
-    bbox: tuple[int, int, int, int], frame_width: int, num_lanes: int
+    bbox: tuple[float, float, float, float], frame_width: int, num_lanes: int
 ) -> int | None:
     """Map plate bbox horizontal center to lane 1..N (left → right)."""
     if num_lanes < 1 or frame_width <= 0:
@@ -199,9 +199,7 @@ def encode_preview_jpeg(image: np.ndarray) -> tuple[bytes, float]:
             (max(1, round(width * scale)), max(1, round(height * scale))),
             interpolation=cv2.INTER_AREA,
         )
-    ok, buf = cv2.imencode(
-        ".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), PREVIEW_JPEG_QUALITY]
-    )
+    ok, buf = cv2.imencode(".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), PREVIEW_JPEG_QUALITY])
     if not ok:
         raise RuntimeError("Failed to encode preview JPEG")
     return buf.tobytes(), scale
@@ -240,7 +238,9 @@ class MinioUploader:
         return key
 
     def upload_jpeg(self, key: str, data: bytes, cache_control: str | None = None) -> str:
-        meta = {"Cache-Control": cache_control} if cache_control else None
+        meta: dict[str, str | list[str] | tuple[str]] | None = (
+            {"Cache-Control": cache_control} if cache_control else None
+        )
         self.client.put_object(
             self.settings.minio_bucket,
             key,
@@ -402,7 +402,7 @@ class OCRPipeline:
                 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
                 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
                 if annotate_out and self._annotate_writer is None and width > 0:
-                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
                     self._annotate_writer = cv2.VideoWriter(
                         annotate_out, fourcc, max(fps, 1.0), (width, height)
                     )
@@ -430,7 +430,9 @@ class OCRPipeline:
                     break
                 if not do_reconnect or not emptied:
                     break
-                logger.warning("Stream ended for %s; reconnecting in %.1fs", source, reconnect_delay)
+                logger.warning(
+                    "Stream ended for %s; reconnecting in %.1fs", source, reconnect_delay
+                )
                 import time
 
                 time.sleep(reconnect_delay)
@@ -682,9 +684,7 @@ class OCRPipeline:
                 state.best_crop = enhanced.copy()
         state.last_text = enhanced_text
         state.last_ocr_conf = float(statistics.mean(probs)) if probs else float(hit.ocr_confidence)
-        state.frame_reads.append(
-            FrameRead(text=enhanced_text, char_probs=probs, quality=quality)
-        )
+        state.frame_reads.append(FrameRead(text=enhanced_text, char_probs=probs, quality=quality))
 
     def _process_frame_legacy(self, frame: np.ndarray) -> None:
         assert self.vehicle_detector is not None
@@ -731,9 +731,7 @@ class OCRPipeline:
             rectified = rectify_plate(frame, corners, two_row=two_row)
             pixel_h = float(np.linalg.norm(corners[3] - corners[0]))
             quality = compute_quality(rectified, pixel_h)
-            rec = self.recognizer.recognize(
-                enhance_plate(rectified, quality, None, self.enhancer)
-            )
+            rec = self.recognizer.recognize(enhance_plate(rectified, quality, None, self.enhancer))
             rec2 = self.recognizer.recognize(
                 enhance_plate(rectified, quality, rec.confidence, self.enhancer)
             )
@@ -783,9 +781,7 @@ class OCRPipeline:
         crop_key = None
         if state.best_crop is not None and self.uploader is not None:
             try:
-                crop_key = self.uploader.upload_crop(
-                    state.best_crop, self.camera_id, str(event_id)
-                )
+                crop_key = self.uploader.upload_crop(state.best_crop, self.camera_id, str(event_id))
             except (OSError, ValueError) as exc:
                 logger.warning("MinIO upload failed: %s", exc)
 
@@ -806,7 +802,16 @@ class OCRPipeline:
             crop_key=crop_key,
             source="ocr",
             track_id=state.track_id,
-            bbox=list(state.last_bbox) if state.last_bbox else None,
+            bbox=(
+                (
+                    float(state.last_bbox[0]),
+                    float(state.last_bbox[1]),
+                    float(state.last_bbox[2]),
+                    float(state.last_bbox[3]),
+                )
+                if state.last_bbox and len(state.last_bbox) == 4
+                else None
+            ),
         )
         self.publisher.publish(read)
         return True

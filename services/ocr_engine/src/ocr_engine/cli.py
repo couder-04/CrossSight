@@ -88,7 +88,9 @@ def run_cmd(
 
 
 @main.command("fleet")
-@click.option("--config", required=True, type=click.Path(exists=True), help="YAML/JSON camera fleet config")
+@click.option(
+    "--config", required=True, type=click.Path(exists=True), help="YAML/JSON camera fleet config"
+)
 @click.option(
     "--backend",
     type=click.Choice(["plateocr", "legacy"], case_sensitive=False),

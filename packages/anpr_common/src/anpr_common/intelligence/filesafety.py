@@ -7,7 +7,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
-VIDEO_EXT = {"mp4": "video/mp4", "mov": "video/quicktime", "avi": "video/x-msvideo", "mkv": "video/x-matroska", "webm": "video/webm"}
+VIDEO_EXT = {
+    "mp4": "video/mp4",
+    "mov": "video/quicktime",
+    "avi": "video/x-msvideo",
+    "mkv": "video/x-matroska",
+    "webm": "video/webm",
+}
 IMAGE_EXT = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 TABLE_EXT = {"csv": "text/csv", "json": "application/json", "geojson": "application/geo+json"}
 
@@ -81,7 +87,7 @@ def validate_upload(
     elif kind in {"csv", "watchlist", "registry", "cameras"}:
         if ext != "csv":
             raise ValueError("expected a .csv file")
-        if data.startswith(b"\xff\xd8") or data.startswith(b"\x89PNG") or data[4:8] == b"ftyp":
+        if data.startswith((b"\xff\xd8", b"\x89PNG")) or data[4:8] == b"ftyp":
             raise ValueError("csv content looks like media")
         mime = "text/csv"
     elif kind in {"json", "calibration", "cameras_json"}:
@@ -94,10 +100,15 @@ def validate_upload(
         mime = "application/geo+json"
     else:
         raise ValueError(f"unknown upload kind {kind}")
-    if claimed_type and claimed_type.split(";")[0].strip().lower() not in {mime, "application/octet-stream", ""}:
-        # Client MIME is advisory. Reject only an obvious contradiction for media.
-        if kind in {"video", "image"} and not claimed_type.lower().startswith(mime.split("/")[0]):
-            raise ValueError("declared content type does not match file bytes")
+    # Client MIME is advisory. Reject only an obvious contradiction for media.
+    claimed = claimed_type.split(";")[0].strip().lower() if claimed_type else ""
+    if (
+        claimed_type
+        and claimed not in {mime, "application/octet-stream", ""}
+        and kind in {"video", "image"}
+        and not claimed_type.lower().startswith(mime.split("/")[0])
+    ):
+        raise ValueError("declared content type does not match file bytes")
     return {"filename": safe, "mime": mime, "ext": ext, "size": len(data)}
 
 

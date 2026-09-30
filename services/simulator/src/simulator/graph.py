@@ -154,9 +154,9 @@ def download_osm_graph(settings: Settings) -> nx.MultiDiGraph | None:
             g = ox.graph_from_place(settings.city_query, network_type="drive")
         else:
             return None
-        g = ox.add_edge_lengths(g)
+        g = ox.add_edge_lengths(g)  # type: ignore[attr-defined]
         return enrich_graph_edges(g)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("OSM graph download failed (%s); using synthetic grid", exc)
         return None
 
@@ -171,21 +171,23 @@ def load_graph(settings: Settings, force_synthetic: bool = False) -> nx.MultiDiG
             g = nx.MultiDiGraph(g)
         return enrich_graph_edges(g)
 
-    g: nx.MultiDiGraph | None = None
+    osm: nx.MultiDiGraph | None = None
     if not force_synthetic:
-        g = download_osm_graph(settings)
-        if g is not None:
+        osm = download_osm_graph(settings)
+        if osm is not None:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            nx.write_graphml(g, path)
+            nx.write_graphml(osm, path)
             logger.info("Cached OSM graph to %s", path)
 
-    if g is None:
-        logger.info("Using synthetic %dx%d grid near Pune", SYNTHETIC_GRID_SIZE, SYNTHETIC_GRID_SIZE)
-        g = build_synthetic_grid()
+    if osm is None:
+        logger.info(
+            "Using synthetic %dx%d grid near Pune", SYNTHETIC_GRID_SIZE, SYNTHETIC_GRID_SIZE
+        )
+        osm = build_synthetic_grid()
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        nx.write_graphml(g, path)
+        nx.write_graphml(osm, path)
 
-    return g
+    return osm
 
 
 def node_latlon(graph: nx.MultiDiGraph, node: int | str) -> tuple[float, float]:

@@ -48,8 +48,7 @@ def load_camera_fleet(path: str | Path) -> list[CameraSource]:
             import yaml
         except ImportError as exc:
             raise RuntimeError(
-                "PyYAML is required for YAML fleet configs. "
-                "Use JSON or `uv add pyyaml`."
+                "PyYAML is required for YAML fleet configs. Use JSON or `uv add pyyaml`."
             ) from exc
         data = yaml.safe_load(text)
     else:

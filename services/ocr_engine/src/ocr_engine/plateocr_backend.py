@@ -18,7 +18,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, cast
 
 import numpy as np
 
@@ -32,7 +32,12 @@ DEFAULT_DETECTOR = "yolo-v9-s-608-license-plate-end2end"
 DEFAULT_OCR = "india-v1"
 
 # Inference-only accuracy levers (no retrain / no new labels). Override via env.
-_TTA_DEFAULT = os.environ.get("PLATEOCR_TTA", "1").strip().lower() not in ("0", "false", "off", "no")
+_TTA_DEFAULT = os.environ.get("PLATEOCR_TTA", "1").strip().lower() not in (
+    "0",
+    "false",
+    "off",
+    "no",
+)
 _BBOX_PAD_DEFAULT = os.environ.get("PLATEOCR_BBOX_PAD", "1").strip().lower() not in (
     "0",
     "false",
@@ -109,7 +114,7 @@ def fetch_custom_model(name: str) -> tuple[Path, Path]:
             url = f"{base}/{spec['tag']}/{fname}"
             logger.info("Downloading %s", url)
             tmp = dest.with_suffix(dest.suffix + ".part")
-            urllib.request.urlretrieve(url, tmp)  # noqa: S310 - pinned model URL
+            urllib.request.urlretrieve(url, tmp)
             if _sha256(tmp) != sha:
                 tmp.unlink(missing_ok=True)
                 raise RuntimeError(f"Checksum mismatch for {url}; refusing to use it")
@@ -125,7 +130,7 @@ class FormatOCR:
     views (CLAHE / pad / scale / mild deblur) before format decode.
     """
 
-    DECODERS = {"india": decode_india}
+    DECODERS: ClassVar[dict[str, Any]] = {"india": decode_india}
 
     def __init__(self, inner: Any, plate_format: str, *, tta: bool = _TTA_DEFAULT) -> None:
         self.inner = inner
@@ -142,7 +147,9 @@ class FormatOCR:
             return None
         cfg = self.rec.config
         code = {"grayscale": cv2.COLOR_BGR2GRAY, "rgb": cv2.COLOR_BGR2RGB}[cfg.image_color_mode]
-        x = preprocess_image(_load_image_from_source(cv2.cvtColor(cropped_plate, code), cfg))
+        x = preprocess_image(
+            _load_image_from_source(cast(Any, cv2.cvtColor(cropped_plate, code)), cfg)
+        )
         out = self.rec.model.run([self.rec.plate_output_name], {"input": x})[0]
         return out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
 
@@ -189,7 +196,6 @@ def _find_sessions(obj: object, depth: int = 4, seen: set[int] | None = None) ->
 
 def _self_test(alpr: Any) -> None:
     """Run every ONNX session on dummy input so provider errors raise (also warms up)."""
-    import onnxruntime as ort
 
     sessions = _find_sessions(alpr)
     if not sessions:
@@ -251,9 +257,13 @@ class PlateOCRReader:
         except Exception as exc:
             if providers == ["CPUExecutionProvider"] or device == "cuda":
                 raise
-            logger.warning("GPU self-test failed, falling back to CPU: %s", str(exc).splitlines()[0])
+            logger.warning(
+                "GPU self-test failed, falling back to CPU: %s", str(exc).splitlines()[0]
+            )
             providers = ["CPUExecutionProvider"]
-            self._alpr = self._build(ALPR, detector_model, ocr_model, ocr_config, det_conf, providers)
+            self._alpr = self._build(
+                ALPR, detector_model, ocr_model, ocr_config, det_conf, providers
+            )
             _self_test(self._alpr)
         if plate_format:
             self._alpr.ocr = FormatOCR(self._alpr.ocr, plate_format, tta=self.tta)
@@ -375,6 +385,8 @@ class PlateOCRReader:
         text = r.text.replace("_", "").strip().upper()
         text = "".join(ch for ch in text if ch.isalnum())
         return text, conf, char_probs
+
+
 class PlateOCRRecognizer(Recognizer):
     """Recognizer adapter: runs full ALPR on a crop (or whole image)."""
 

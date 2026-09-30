@@ -35,7 +35,7 @@ from simulator.scenarios import ScenarioBundle, build_scenarios, scenario_inject
 from simulator.seed import build_zones
 from simulator.trips import build_zone_node_map
 from workers.alerts.engine import AlertEngine, build_rules
-from workers.alerts.rules import AlertDeduper, CONVOY_LOOKBACK_MIN, CONVOY_TIME_WINDOW_SEC
+from workers.alerts.rules import CONVOY_LOOKBACK_MIN, CONVOY_TIME_WINDOW_SEC, AlertDeduper
 from workers.db import CameraInfo, CameraPair
 
 REPORTS = ROOT / "reports"
@@ -81,7 +81,9 @@ class ProofContext:
     redis: FakeRedis
     sensitive_cams: set[str]
     restricted_cams: dict[str, tuple[str, dict[str, Any]]]
-    _loiter_counts: dict[tuple[str, str], list[datetime]] = field(default_factory=lambda: defaultdict(list))
+    _loiter_counts: dict[tuple[str, str], list[datetime]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
     pg_pool: Any = None
 
     async def last_seen(self, plate_norm: str) -> tuple[str, datetime, float] | None:
@@ -258,7 +260,7 @@ def _build_ctx(settings, cameras, bundle: ScenarioBundle, pairs: list[CameraPair
 
 
 async def run_seed(seed: int) -> dict[str, Any]:
-    settings, graph, cameras, zones, bundle, zone_node_map = _build_world(seed)
+    settings, graph, cameras, _zones, bundle, zone_node_map = _build_world(seed)
     pairs = _pairs(graph, cameras)
     ctx = _build_ctx(settings, cameras, bundle, pairs)
     engine = AlertEngine(build_rules(None), ctx, AlertDeduper())
@@ -294,7 +296,8 @@ async def run_seed(seed: int) -> dict[str, Any]:
     convoy_expected = {e[1] for e in expected if e[0] == "convoy"}
     convoy_fired = {p for t, p in fired if t == "convoy"}
     convoy_ok = convoy_expected.issubset(convoy_fired) or bool(
-        convoy_expected & set(bundle.convoy["plates"]) and any(p in set(bundle.convoy["plates"]) for p in convoy_fired)
+        convoy_expected & set(bundle.convoy["plates"])
+        and any(p in set(bundle.convoy["plates"]) for p in convoy_fired)
     )
     # Accept convoy if any convoy plate alerted (engine alerts the plate that closes the set)
     if convoy_expected and not convoy_ok:
@@ -314,8 +317,16 @@ async def run_seed(seed: int) -> dict[str, Any]:
         },
         "cloned_plate": {
             "expected": [p["plate_norm"] for p in bundle.cloned_pairs],
-            "hit": [p["plate_norm"] for p in bundle.cloned_pairs if ("cloned_plate", p["plate_norm"]) in fired],
-            "miss": [p["plate_norm"] for p in bundle.cloned_pairs if ("cloned_plate", p["plate_norm"]) not in fired],
+            "hit": [
+                p["plate_norm"]
+                for p in bundle.cloned_pairs
+                if ("cloned_plate", p["plate_norm"]) in fired
+            ],
+            "miss": [
+                p["plate_norm"]
+                for p in bundle.cloned_pairs
+                if ("cloned_plate", p["plate_norm"]) not in fired
+            ],
         },
         "convoy": {
             "expected_lead": bundle.convoy["lead_plate"],
@@ -358,7 +369,9 @@ async def run_seed(seed: int) -> dict[str, Any]:
 async def run_isolated_situations() -> list[dict[str, Any]]:
     """Hand-crafted situations that don't depend on full city seed variance."""
     results: list[dict[str, Any]] = []
-    settings = SimpleNamespace(max_urban_speed_kmh=120.0, route_anomaly_min_cameras=3, route_anomaly_distance_m=8000.0)
+    settings = SimpleNamespace(
+        max_urban_speed_kmh=120.0, route_anomaly_min_cameras=3, route_anomaly_distance_m=8000.0
+    )
 
     # 1. Watchlist exact + fuzzy
     redis = FakeRedis()
@@ -389,7 +402,9 @@ async def run_isolated_situations() -> list[dict[str, Any]]:
     )
 
     # Watchlist fuzzy (1-char edit)
-    a = await _prime_and_process(engine, ctx, _make_read("MH12AB1235", "cam-a", START + timedelta(minutes=1)))
+    a = await _prime_and_process(
+        engine, ctx, _make_read("MH12AB1235", "cam-a", START + timedelta(minutes=1))
+    )
     results.append(
         {
             "situation": "watchlist_fuzzy_1edit",
@@ -495,7 +510,11 @@ async def run_isolated_situations() -> list[dict[str, Any]]:
         ctx,
         _make_read("KA01BN9999", "cam-b", START + timedelta(hours=3), direction="E"),
     )
-    bad = [x.type.value for x in a if x.type.value in {"cloned_plate", "wrong_way", "watchlist", "convoy"}]
+    bad = [
+        x.type.value
+        for x in a
+        if x.type.value in {"cloned_plate", "wrong_way", "watchlist", "convoy"}
+    ]
     results.append(
         {
             "situation": "benign_single_pass_no_false_positive",
@@ -548,7 +567,9 @@ async def run_isolated_situations() -> list[dict[str, Any]]:
     return results
 
 
-def _aggregate(seed_results: list[dict[str, Any]], isolated: list[dict[str, Any]]) -> dict[str, Any]:
+def _aggregate(
+    seed_results: list[dict[str, Any]], isolated: list[dict[str, Any]]
+) -> dict[str, Any]:
     n = len(seed_results)
     passed = sum(1 for r in seed_results if r["pass"])
     by_type = {
@@ -589,8 +610,8 @@ def _write_md(payload: dict[str, Any]) -> str:
         f"**Overall: {'PASS' if agg['overall_pass'] else 'FAIL'}**",
         "",
         f"- City seeds simulated: **{agg['seeds_run']}** (independent scenarios.json packs)",
-        f"- Seeds fully matched expected_alerts: **{agg['seeds_passed']}/{agg['seeds_run']}** ({agg['seed_pass_rate']*100:.1f}%)",
-        f"- Isolated situations: **{agg['isolated_passed']}/{agg['isolated_run']}** ({agg['isolated_pass_rate']*100:.1f}%)",
+        f"- Seeds fully matched expected_alerts: **{agg['seeds_passed']}/{agg['seeds_run']}** ({agg['seed_pass_rate'] * 100:.1f}%)",
+        f"- Isolated situations: **{agg['isolated_passed']}/{agg['isolated_run']}** ({agg['isolated_pass_rate'] * 100:.1f}%)",
         "",
         "## Detection rates across city seeds",
         "",
@@ -598,9 +619,7 @@ def _write_md(payload: dict[str, Any]) -> str:
         "|---|---|",
     ]
     bt = agg["by_type"]
-    lines.append(
-        f"| watchlist | {bt['watchlist']['hit']}/{bt['watchlist']['expected']} plates |"
-    )
+    lines.append(f"| watchlist | {bt['watchlist']['hit']}/{bt['watchlist']['expected']} plates |")
     lines.append(
         f"| cloned_plate | {bt['cloned_plate']['hit']}/{bt['cloned_plate']['expected']} plates |"
     )

@@ -7,11 +7,10 @@ from typing import Any
 from uuid import UUID
 
 from anpr_common.config import Settings
-from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
-
 from anpr_common.intelligence.access import role_can
 from anpr_common.intelligence.review import ReviewError, transition_status
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import select
 
 from api.auditutil import audit_row
 from api.db import AlertReviewRow, AlertRow
@@ -60,7 +59,7 @@ def _crop_url(
             crop_key,
             expires=timedelta(hours=1),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 

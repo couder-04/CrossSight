@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from anpr_common.geo import opposite_direction
@@ -79,12 +79,12 @@ def build_scenarios(
 
     pairs_data = compute_camera_pairs(graph, cameras)
     # Prefer the farthest camera pairs so a short gap yields impossible speed.
-    distant = sorted(pairs_data, key=lambda p: float(p["distance_m"]), reverse=True)
+    distant = sorted(pairs_data, key=lambda p: float(cast(Any, p["distance_m"])), reverse=True)
     # Deduplicate by unordered camera pair so we don't reuse the same link.
     seen_links: set[frozenset[str]] = set()
     unique_distant: list[dict[str, Any]] = []
     for p in distant:
-        link = frozenset((p["camera_a"], p["camera_b"]))
+        link = frozenset((cast(str, p["camera_a"]), cast(str, p["camera_b"])))
         if link in seen_links:
             continue
         seen_links.add(link)
@@ -181,7 +181,12 @@ def build_scenarios(
             "entry_hour_local": 23,
         },
         all_scenario_plates=sorted(
-            set(watchlist + convoy_plates + [loiter_plate, wrong_plate, restricted_plate] + [p["plate_norm"] for p in cloned_pairs])
+            set(
+                watchlist
+                + convoy_plates
+                + [loiter_plate, wrong_plate, restricted_plate]
+                + [p["plate_norm"] for p in cloned_pairs]
+            )
         ),
     )
     return bundle

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -223,7 +224,7 @@ def get_session_factory(settings: Settings | None = None) -> async_sessionmaker[
     return _session_factory
 
 
-async def get_session() -> AsyncSession:
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
     factory = get_session_factory()
     async with factory() as session:
         yield session

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
 from geoalchemy2 import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
 from minio.error import S3Error
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 
 from api.db import Camera
 from api.deps import AdminUserDep, MinioDep, SessionDep, SettingsDep, UserDep
@@ -29,9 +31,7 @@ def frame_exists(minio, settings, camera_id: str) -> bool:
         return False
 
 
-def _camera_out(
-    row: Camera, lat: float, lng: float, *, has_live_frame: bool = False
-) -> CameraOut:
+def _camera_out(row: Camera, lat: float, lng: float, *, has_live_frame: bool = False) -> CameraOut:
     return CameraOut(
         id=row.id,
         name=row.name,
@@ -183,6 +183,6 @@ async def delete_camera(
     _admin: AdminUserDep,
 ) -> None:
     result = await session.execute(delete(Camera).where(Camera.id == camera_id))
-    if result.rowcount == 0:
+    if cast(CursorResult[Any], result).rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
     await session.commit()

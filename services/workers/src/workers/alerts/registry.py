@@ -55,7 +55,7 @@ class FileRegistryClient:
             return
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise ValueError(f"Registry file must be a JSON object: {self.path}")
+            raise ValueError(f"Registry file must be a JSON object: {self.path}")  # noqa: TRY004
         for plate, meta in raw.items():
             if not isinstance(meta, dict):
                 continue

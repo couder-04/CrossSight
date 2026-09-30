@@ -99,7 +99,9 @@ class ParseqRecognizer(Recognizer):
             pred, _ = self._model.tokenizer.decode(probs)
         raw = pred[0] if pred else ""
         text = re.sub(r"[^A-Z0-9]", "", raw.upper())
-        char_probs = [float(probs[0, i].max().item()) for i in range(min(len(text), probs.shape[1]))]
+        char_probs = [
+            float(probs[0, i].max().item()) for i in range(min(len(text), probs.shape[1]))
+        ]
         if len(char_probs) < len(text):
             char_probs.extend([0.8] * (len(text) - len(char_probs)))
         confidence = sum(char_probs) / len(char_probs) if char_probs else 0.0

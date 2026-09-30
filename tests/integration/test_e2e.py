@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -57,7 +57,10 @@ def _expected_from_scenarios(scenarios: dict) -> list[tuple[str, str]]:
 
 def test_watchlist_zero_false_negatives(scenarios, api_client):
     client = api_client("operator", "operator123")
-    wl = set(scenarios.get("watchlist_plates") or scenarios.get("expected_alerts", {}).get("watchlist", []))
+    wl = set(
+        scenarios.get("watchlist_plates")
+        or scenarios.get("expected_alerts", {}).get("watchlist", [])
+    )
     deadline = time.time() + 60
     found: set[str] = set()
     while time.time() < deadline:
@@ -85,7 +88,9 @@ def test_scenario_alert_types(scenarios, api_client):
     assert not hard, f"missing scenario alerts: {hard}"
     if soft:
         for _, plate in soft:
-            assert any(a["plate_norm"] == plate for a in alerts), f"no alerts for loiter plate {plate}"
+            assert any(a["plate_norm"] == plate for a in alerts), (
+                f"no alerts for loiter plate {plate}"
+            )
 
 
 def test_trajectory_recovery(scenarios, api_client):
@@ -94,7 +99,7 @@ def test_trajectory_recovery(scenarios, api_client):
     if not plate:
         pytest.skip("no scenario plate for trajectory")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     r = client.get(
         "/trajectory",
         params={
@@ -117,7 +122,7 @@ def test_od_k_anonymity(api_client):
     from anpr_common.config import get_settings
 
     k = get_settings().od_k_anon
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     r = client.get("/analytics/od", params={"date": today, "hour": 8})
     r.raise_for_status()
     data = r.json()
@@ -129,7 +134,7 @@ def test_od_k_anonymity(api_client):
 
 def test_analyst_forbidden_trajectory(api_client):
     client = api_client("analyst", "analyst123")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     r = client.get(
         "/trajectory",
         params={
@@ -145,7 +150,7 @@ def test_analyst_forbidden_trajectory(api_client):
 def test_trajectory_writes_audit(api_client):
     op = api_client("operator", "operator123")
     admin = api_client("admin", "admin123")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     case_id = f"e2e-audit-{int(time.time())}"
     op.get(
         "/trajectory",
@@ -160,8 +165,7 @@ def test_trajectory_writes_audit(api_client):
     r.raise_for_status()
     rows = r.json()
     assert any(
-        (row.get("case_id") == case_id)
-        or (row.get("params") or {}).get("case_id") == case_id
+        (row.get("case_id") == case_id) or (row.get("params") or {}).get("case_id") == case_id
         for row in rows
     ), "audit_log missing trajectory case_id"
 
