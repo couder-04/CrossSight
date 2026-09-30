@@ -18,11 +18,14 @@ Library usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import os
 import statistics
 import sys
 import time
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -30,6 +33,11 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 from fast_alpr import ALPR
+from fast_alpr.base import BaseOCR, OcrResult
+from fast_plate_ocr.core.process import preprocess_image
+from fast_plate_ocr.inference.plate_recognizer import _load_image_from_source
+
+from plate_format import decode_india
 
 log = logging.getLogger("alpr")
 
@@ -39,6 +47,20 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 # for edge devices (see RESEARCH.md for the full list).
 DEFAULT_DETECTOR = "yolo-v9-s-608-license-plate-end2end"
 DEFAULT_OCR = "cct-s-v2-global-model"
+
+# Fine-tuned OCR models published as GitHub Release assets of this repo. `--ocr india-v1` downloads
+# them once into PLATE_OCR_CACHE (default ~/.cache/plate-ocr), checks the SHA-256, then reuses them.
+# PLATE_OCR_MODEL_URL overrides the download base (mirror, offline server); files are fetched from
+# <base>/<tag>/<file>. See MODEL_CARD.md.
+RELEASES_URL = "https://github.com/Ajitesh-07/PlateOCR/releases/download"
+CUSTOM_OCR_MODELS = {
+    "india-v1": {
+        "tag": "india-ocr-v1",
+        "onnx": ("india_ocr_v1.onnx", "6fbb878e1bec7e318c9b43d58f4093d5bb7cb21bfe9d7d5fc18047f6c007a6f8"),
+        "config": ("india_ocr_v1_plate_config.yaml", "3f4718541abd7ba9e7fc050cfbda7463b64b9795d8c99689019c5b58a8e65b41"),
+        "plate_format": "india",
+    },
+}
 
 
 @dataclass
@@ -61,6 +83,55 @@ def _pick_providers(device: str) -> list[str]:
     return [p for p in preferred if p in available]
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def fetch_custom_model(name: str) -> tuple[Path, Path]:
+    """Return local (onnx, plate_config) paths for a CUSTOM_OCR_MODELS entry, downloading if needed."""
+    spec = CUSTOM_OCR_MODELS[name]
+    cache = Path(os.environ.get("PLATE_OCR_CACHE", Path.home() / ".cache" / "plate-ocr")) / name
+    base = os.environ.get("PLATE_OCR_MODEL_URL", RELEASES_URL).rstrip("/")
+    cache.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for fname, sha in (spec["onnx"], spec["config"]):
+        dest = cache / fname
+        if not (dest.exists() and _sha256(dest) == sha):
+            url = f"{base}/{spec['tag']}/{fname}"
+            log.info("Downloading %s", url)
+            tmp = dest.with_suffix(dest.suffix + ".part")
+            urllib.request.urlretrieve(url, tmp)
+            if _sha256(tmp) != sha:
+                tmp.unlink()
+                raise RuntimeError(f"Checksum mismatch for {url}; refusing to use it")
+            tmp.replace(dest)
+        paths.append(dest)
+    return paths[0], paths[1]
+
+
+class FormatOCR(BaseOCR):
+    """Wraps fast-alpr's DefaultOCR and decodes the raw per-slot probabilities under a plate
+    grammar (see plate_format.py) instead of taking the argmax per slot."""
+
+    DECODERS = {"india": decode_india}
+
+    def __init__(self, inner: BaseOCR, plate_format: str) -> None:
+        self.inner = inner
+        self.decode = self.DECODERS[plate_format]
+        self.rec = inner.ocr_model  # fast_plate_ocr LicensePlateRecognizer
+
+    def predict(self, cropped_plate: np.ndarray) -> OcrResult | None:
+        if cropped_plate is None or cropped_plate.size == 0:
+            return None
+        cfg = self.rec.config
+        code = {"grayscale": cv2.COLOR_BGR2GRAY, "rgb": cv2.COLOR_BGR2RGB}[cfg.image_color_mode]
+        x = preprocess_image(_load_image_from_source(cv2.cvtColor(cropped_plate, code), cfg))
+        out = self.rec.model.run([self.rec.plate_output_name], {"input": x})[0]
+        probs = out.reshape(cfg.max_plate_slots, len(cfg.alphabet))
+        text, confs = self.decode(probs, cfg.alphabet, cfg.pad_char)
+        return OcrResult(text=text, confidence=confs)
+
+
 class PlateReader:
     """Loads the models once; call `read()` per frame. Not thread-safe per instance for drawing,
     but `read()` itself is safe to call from one worker at a time."""
@@ -72,7 +143,22 @@ class PlateReader:
         device: str = "auto",
         det_conf: float = 0.4,
         min_ocr_conf: float = 0.0,
+        ocr_config: str | None = None,
+        plate_format: str | None = None,
     ) -> None:
+        """`ocr_model` is a hub name or a path to a fine-tuned .onnx. For a path, `ocr_config` is its
+        plate config YAML; if omitted, the only *.yaml next to the .onnx is used.
+        `ocr_model` can also name a published fine-tuned model (CUSTOM_OCR_MODELS, e.g. "india-v1"); it is
+        downloaded on first use and brings its own default `plate_format`.
+        `plate_format="india"` only returns plates that match the Indian format (see plate_format.py);
+        "none" turns format decoding off, even for models that default to it."""
+        if ocr_model in CUSTOM_OCR_MODELS:
+            spec = CUSTOM_OCR_MODELS[ocr_model]
+            onnx_path, cfg_path = fetch_custom_model(ocr_model)
+            ocr_model, ocr_config = str(onnx_path), str(cfg_path)
+            plate_format = plate_format or spec["plate_format"]
+        if plate_format == "none":
+            plate_format = None
         if device in ("auto", "cuda"):
             # onnxruntime-gpu >= 1.21 can load CUDA/cuDNN DLLs shipped via pip (nvidia-* wheels)
             try:
@@ -81,7 +167,7 @@ class PlateReader:
                 pass
         self.min_ocr_conf = min_ocr_conf
         providers = _pick_providers(device)
-        self.alpr = self._build(detector_model, ocr_model, det_conf, providers)
+        self.alpr = self._build(detector_model, ocr_model, ocr_config, det_conf, providers)
         try:
             _self_test(self.alpr)
         except Exception as e:  # noqa: BLE001
@@ -91,19 +177,32 @@ class PlateReader:
             # fast-alpr swallows that and returns zero plates, so fail over explicitly.
             log.warning("GPU self-test failed, falling back to CPU: %s", str(e).splitlines()[0])
             providers = ["CPUExecutionProvider"]
-            self.alpr = self._build(detector_model, ocr_model, det_conf, providers)
+            self.alpr = self._build(detector_model, ocr_model, ocr_config, det_conf, providers)
             _self_test(self.alpr)
         self.providers = providers
+        if plate_format:
+            self.alpr.ocr = FormatOCR(self.alpr.ocr, plate_format)
         log.info("Running on: %s", providers[0])
 
     @staticmethod
-    def _build(detector_model: str, ocr_model: str, det_conf: float, providers: list[str]) -> ALPR:
+    def _build(
+        detector_model: str, ocr_model: str, ocr_config: str | None, det_conf: float, providers: list[str]
+    ) -> ALPR:
+        ocr_kwargs: dict = {"ocr_model": ocr_model}
+        if ocr_model.endswith(".onnx"):
+            model_path = Path(ocr_model)
+            if ocr_config is None:
+                yamls = list(model_path.parent.glob("*.yaml"))
+                if len(yamls) != 1:
+                    raise ValueError(f"Pass ocr_config: expected one *.yaml next to {model_path}, found {len(yamls)}")
+                ocr_config = str(yamls[0])
+            ocr_kwargs = {"ocr_model": None, "ocr_model_path": model_path, "ocr_config_path": ocr_config}
         return ALPR(
             detector_model=detector_model,
             detector_conf_thresh=det_conf,
             detector_providers=providers,
-            ocr_model=ocr_model,
             ocr_providers=providers,
+            **ocr_kwargs,
         )
 
     def read(self, image: np.ndarray | str | Path) -> list[Plate]:
@@ -128,6 +227,14 @@ class PlateReader:
                 )
             )
         return plates
+
+    def read_crop(self, plate_img: np.ndarray) -> tuple[str, float]:
+        """OCR only, for an image that is already a cropped plate. Returns (text, confidence)."""
+        r = self.alpr.ocr.predict(plate_img)
+        if r is None or not r.text:
+            return "", 0.0
+        conf = statistics.mean(r.confidence) if isinstance(r.confidence, list) else r.confidence
+        return r.text.replace("_", "").strip(), float(conf)
 
 
 _ORT_DTYPES = {"tensor(float)": np.float32, "tensor(float16)": np.float16, "tensor(uint8)": np.uint8}
@@ -202,8 +309,11 @@ def main() -> int:
     ap.add_argument("--out", help="Directory to write annotated images to")
     ap.add_argument("--json", help="Write all results to this JSON file")
     ap.add_argument("--detector", default=DEFAULT_DETECTOR)
-    ap.add_argument("--ocr", default=DEFAULT_OCR)
+    ap.add_argument("--ocr", default=DEFAULT_OCR, help="Hub model name, published model (india-v1) or path to a .onnx")
+    ap.add_argument("--ocr-config", help="Plate config YAML for a custom --ocr .onnx")
     ap.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
+    ap.add_argument("--plate-format", choices=[*sorted(FormatOCR.DECODERS), "none"],
+                    help="Constrain reads to a plate format (published models set a default; 'none' disables)")
     ap.add_argument("--det-conf", type=float, default=0.4, help="Detector confidence threshold")
     ap.add_argument("--min-ocr-conf", type=float, default=0.0, help="Drop reads below this OCR confidence")
     args = ap.parse_args()
@@ -215,7 +325,7 @@ def main() -> int:
         return 1
 
     t0 = time.perf_counter()
-    reader = PlateReader(args.detector, args.ocr, args.device, args.det_conf, args.min_ocr_conf)
+    reader = PlateReader(args.detector, args.ocr, args.device, args.det_conf, args.min_ocr_conf, args.ocr_config, args.plate_format)
     log.info("Models loaded in %.2fs", time.perf_counter() - t0)
 
     out_dir = Path(args.out) if args.out else None

@@ -34,6 +34,17 @@ def main() -> None:
 @click.option("--dry-run", is_flag=True, help="Print events instead of publishing to Kafka/MinIO")
 @click.option("--max-frames", type=int, default=None, help="Stop after N frames (debug)")
 @click.option("--lanes", type=int, default=3, help="Number of lanes for lane attribution")
+@click.option(
+    "--ocr-model",
+    default=None,
+    help="OCR model: india-v1 (default), cct-s-v2-global-model, or path to .onnx",
+)
+@click.option(
+    "--plate-format",
+    type=click.Choice(["india", "none"], case_sensitive=False),
+    default=None,
+    help="Format-constrained decoding (india-v1 defaults to india)",
+)
 def run_cmd(
     source: str,
     camera_id: str,
@@ -42,9 +53,18 @@ def run_cmd(
     dry_run: bool,
     max_frames: int | None,
     lanes: int,
+    ocr_model: str | None,
+    plate_format: str | None,
 ) -> None:
     """Run the video OCR pipeline on a file or RTSP stream."""
     settings = get_settings()
+    updates: dict = {}
+    if ocr_model:
+        updates["plateocr_ocr_model"] = ocr_model
+    if plate_format:
+        updates["plateocr_plate_format"] = plate_format
+    if updates:
+        settings = settings.model_copy(update=updates)
     pipeline = OCRPipeline(
         settings=settings,
         camera_id=camera_id,

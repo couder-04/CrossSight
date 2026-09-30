@@ -196,11 +196,14 @@ def main(argv: list[str] | None = None) -> int:
             device=settings.plateocr_device,
             det_conf=settings.plateocr_det_conf,
             min_ocr_conf=settings.plateocr_min_ocr_conf,
+            ocr_config=settings.plateocr_ocr_config or None,
+            plate_format=settings.plateocr_plate_format or None,
         )
         model_ids = {
-            "recognizer": "PlateOCRRecognizer (FastALPR CCT)",
+            "recognizer": "PlateOCRRecognizer (FastALPR / PlateOCR)",
             "detector": settings.plateocr_detector,
             "ocr_model": settings.plateocr_ocr_model,
+            "plate_format": settings.plateocr_plate_format or "auto",
         }
     else:
         from anpr_common.config import get_settings

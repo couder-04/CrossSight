@@ -1,2 +1,4 @@
-Vendored reference from https://github.com/Ajitesh-07/PlateOCR
-Integrated into services/ocr_engine as OCR_BACKEND=plateocr (FastALPR YOLOv9 + CCT ONNX).
+Vendored from https://github.com/Ajitesh-07/PlateOCR
+Synced: 2026-09-30 (includes india-v1 OCR, plate_format decoding, finetune/)
+Integrated into services/ocr_engine as OCR_BACKEND=plateocr.
+Default for this platform: PLATEOCR_OCR_MODEL=india-v1 + plate_format=india.

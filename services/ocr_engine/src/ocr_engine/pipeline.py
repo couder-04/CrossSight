@@ -238,8 +238,15 @@ class OCRPipeline:
                 device=settings.plateocr_device,
                 det_conf=settings.plateocr_det_conf,
                 min_ocr_conf=settings.plateocr_min_ocr_conf,
+                ocr_config=settings.plateocr_ocr_config or None,
+                plate_format=settings.plateocr_plate_format or None,
             )
-            logger.info("OCR pipeline backend=plateocr (FastALPR / PlateOCR)")
+            logger.info(
+                "OCR pipeline backend=plateocr (det=%s ocr=%s format=%s)",
+                settings.plateocr_detector,
+                settings.plateocr_ocr_model,
+                settings.plateocr_plate_format or "auto",
+            )
         else:
             weights = validate_plate_weights(settings.plate_det_weights)
             self.vehicle_detector = VehicleDetector()
@@ -391,15 +398,11 @@ class OCRPipeline:
                 # PlateOCR already OCR'd the raw crop; keep text but store enhanced crop for upload.
                 if quality < 0.45 or hit.ocr_confidence < 0.65:
                     try:
-                        re_hits = self.plateocr_reader.read(enhanced)
-                        if re_hits:
-                            best_re = max(re_hits, key=lambda h: h.ocr_confidence)
-                            if best_re.ocr_confidence >= hit.ocr_confidence:
-                                enhanced_text = best_re.text
-                                probs = best_re.char_probs or [
-                                    best_re.ocr_confidence
-                                ] * max(1, len(best_re.text))
-                                quality = max(quality, float(best_re.det_confidence))
+                        re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
+                        if re_text and re_conf >= hit.ocr_confidence:
+                            enhanced_text = re_text
+                            probs = re_probs or [re_conf] * max(1, len(re_text))
+                            quality = max(quality, float(re_conf))
                     except Exception:
                         logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
                 if quality >= state.best_quality:

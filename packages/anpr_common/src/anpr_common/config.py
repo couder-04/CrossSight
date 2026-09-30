@@ -75,12 +75,18 @@ class Settings(BaseSettings):
         alias="PLATEOCR_DETECTOR",
     )
     plateocr_ocr_model: str = Field(
-        default="cct-s-v2-global-model",
+        default="india-v1",
         alias="PLATEOCR_OCR_MODEL",
     )
     plateocr_device: str = Field(default="auto", alias="PLATEOCR_DEVICE")
     plateocr_det_conf: float = Field(default=0.4, alias="PLATEOCR_DET_CONF")
     plateocr_min_ocr_conf: float = Field(default=0.0, alias="PLATEOCR_MIN_OCR_CONF")
+    plateocr_ocr_config: str = Field(default="", alias="PLATEOCR_OCR_CONFIG")
+    plateocr_plate_format: str = Field(
+        default="india",
+        alias="PLATEOCR_PLATE_FORMAT",
+        description="india | none | empty (auto from model). India fine-tune defaults to india.",
+    )
     registry_path: str = Field(default="", alias="REGISTRY_PATH")
     route_anomaly_min_cameras: int = Field(default=3, alias="ROUTE_ANOMALY_MIN_CAMERAS")
     route_anomaly_distance_m: float = Field(default=8000.0, alias="ROUTE_ANOMALY_DISTANCE_M")

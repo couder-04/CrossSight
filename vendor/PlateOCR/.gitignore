@@ -15,9 +15,19 @@ outputs/
 # Model weights (downloaded to ~/.cache on first run; keep local copies out of git)
 models/
 *.onnx
+*.keras
+
+# Fine-tuning outputs (checkpoints, logs, previews). finetune/data/ is covered by data/ above.
+finetune/runs/
+finetune/export_preview/
+trained_models/
+tensorboard_logs/
 
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Release packages (uploaded as GitHub Release assets, not committed)
+dist/

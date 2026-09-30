@@ -45,7 +45,7 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 | Workers | Ingest, analytics (per-lane flow, congestion, OD, route-density, bottlenecks), alerts (watchlist, clone, convoy, loiter, geofence, wrong-way, **route anomaly**, FileRegistry mismatch) |
 | API | Trajectory + audit/RBAC, heatmap/flow/segments/OD/bottlenecks/anomalies/**route-density**, alerts workflow, **`GET /crops`** |
 | Dashboard | `/live` heatmap + route-density + speed KPI; `/track` path + **crop thumbs**; `/analytics`; `/alerts` incl. route anomaly; `/admin` |
-| OCR engine | PlateOCR (default) + CLAHE/classical deblur, lane attribution, multi-frame fusion, **fleet CLI with RTSP reconnect**, legacy YOLO+PARSeq |
+| OCR engine | PlateOCR **`india-v1`** (default) + Indian format decode, CLAHE/classical deblur, lane attribution, multi-frame fusion, fleet CLI + RTSP reconnect; legacy YOLO+PARSeq |
 
 ### Left
 
@@ -56,7 +56,7 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 | PARSeq fine-tune | Legacy template only — prefer CCT fine-tune for Indian plates |
 | Measured OCR accuracy | CI uses mock recognizer; run `make eval-plateocr` on real crops (never fabricate >90%) |
 | Real cameras | Fleet config is ready — point it at your RTSP/files |
-| Indian plate fine-tune | Global CCT + grammar until local fine-tune |
+| Global multi-region OCR | Default is india-v1; switch to `cct-s-v2-global-model` when needed |
 | Edge and scale | Jetson/Hailo/TensorRT/Flink/CH cluster are notes only |
 | Production auth | Demo users in `.env.example` |
 
@@ -121,12 +121,13 @@ Use `UV_PROJECT_ENVIRONMENT=.venv311` if the default `.venv` is locked on your m
 
 ## Supplying model weights
 
-**Default (`OCR_BACKEND=plateocr`):** no local weight files required. On first run FastALPR downloads ONNX models (~33 MB) to:
+**Default (`OCR_BACKEND=plateocr`):** uses PlateOCR's **`india-v1`** fine-tune + Indian format decoding. On first run weights download to:
 
-- `~/.cache/open-image-models/yolo-v9-s-608-license-plate-end2end/`
-- `~/.cache/fast-plate-ocr/cct-s-v2-global-model/`
+- `~/.cache/open-image-models/yolo-v9-s-608-license-plate-end2end/` (detector, ~28 MB)
+- `~/.cache/plate-ocr/india-v1/` (India OCR ONNX + config, ~5 MB, SHA-256 verified)
+- Optional global OCR: set `PLATEOCR_OCR_MODEL=cct-s-v2-global-model` → `~/.cache/fast-plate-ocr/`
 
-Reference implementation vendored under `vendor/PlateOCR` from [Ajitesh-07/PlateOCR](https://github.com/Ajitesh-07/PlateOCR).
+Upstream reference vendored under `vendor/PlateOCR` from [Ajitesh-07/PlateOCR](https://github.com/Ajitesh-07/PlateOCR) (india-v1, `plate_format.py`, finetune/). See `vendor/PlateOCR/MODEL_CARD.md`.
 
 **Legacy (`OCR_BACKEND=legacy`):** place YOLO plate detector under `models/` (gitignored):
 
@@ -160,9 +161,13 @@ uv run python -m ocr_engine.train.synth_plates --out data/synth --count 5000
 ### Running OCR on your own clips
 
 ```bash
-# PlateOCR (default) — auto weights, detect+read+grammar
+# PlateOCR (default = india-v1 + Indian format decode)
 uv run python -m ocr_engine.cli image --source vendor/PlateOCR/samples/test_image.png --dry-run
 uv run python -m ocr_engine.cli run --source /path/to/clip.mp4 --camera-id cam-001 --dry-run
+uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --ocr-model india-v1 --plate-format india
+
+# Global multi-region OCR (non-Indian)
+uv run python -m ocr_engine.cli run --source clip.mp4 --camera-id cam-001 --ocr-model cct-s-v2-global-model --plate-format none
 
 # Multi-camera fleet (files and/or RTSP, with reconnect)
 uv run python -m ocr_engine.cli fleet --config services/ocr_engine/config/cameras.example.json --dry-run
