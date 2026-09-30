@@ -76,7 +76,7 @@ def test_video_upload_streams_without_large_rss_growth(tmp_path):
         patch("api.main.ensure_seed_users", new=AsyncMock()),
         patch("api.main.apply_postgres_upgrade", new=AsyncMock()),
         patch("api.main.apply_stale_job_recovery", new=AsyncMock()),
-        patch("api.routes.transfers._process_media", new=AsyncMock()),
+        patch("api.routes.uploads._process_media", new=AsyncMock()),
     ):
         app = create_app()
         app.dependency_overrides[get_session] = _session

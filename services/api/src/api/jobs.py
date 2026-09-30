@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from api.db import ExportRow, UploadRow
 
-# Stored status values are lowercase; the writers in transfers.py use these.
+# Stored status values are lowercase; the writers in the upload and export routes use these.
 PROCESSING = "processing"
 FAILED = "failed"
 QUEUED = "queued"

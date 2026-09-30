@@ -13,3 +13,4 @@
 - chore: pin Python to `>=3.11,<3.13`.
 - chore: cloned-plate alerts use a per-camera speed limit when both cameras have one.
 - chore: reject plate bounding boxes that are not four coordinates.
+- refactor: split transfer routes into imports, uploads, exports, and evidence.

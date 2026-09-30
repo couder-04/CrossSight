@@ -21,9 +21,12 @@ from api.routes import (
     auth,
     cameras,
     crops,
+    evidence,
+    exports,
+    imports,
     platform,
     trajectory,
-    transfers,
+    uploads,
     watchlist,
     ws,
     zones,
@@ -93,7 +96,10 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router)
     app.include_router(alerts.router)
     app.include_router(platform.router)
-    app.include_router(transfers.router)
+    app.include_router(imports.router)
+    app.include_router(uploads.router)
+    app.include_router(exports.router)
+    app.include_router(evidence.router)
     app.include_router(crops.router)
     app.include_router(audit.router)
     app.include_router(ws.router)
