@@ -14,7 +14,7 @@ import math
 import statistics
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -34,7 +34,7 @@ from ocr_engine.detect import (
     rectify_plate,
     validate_plate_weights,
 )
-from ocr_engine.enhance import ClassicalDeblurEnhancer, enhance_plate
+from ocr_engine.enhance import CONFIDENCE_THRESHOLD, ClassicalDeblurEnhancer, enhance_plate
 from ocr_engine.fusion import FrameRead, fuse_track_reads
 from ocr_engine.recognize import MockRecognizer, ParseqRecognizer, Recognizer
 
@@ -64,6 +64,7 @@ class TrackState:
     frame_width: int = 0
     last_text: str = ""
     last_ocr_conf: float = 0.0
+    last_seen_ts: datetime | None = None  # capture time of the last frame with this plate
 
 
 def estimate_lane(
@@ -351,6 +352,8 @@ class OCRPipeline:
         self._annotate_writer: cv2.VideoWriter | None = None
         self._last_frame_publish: dict[str, float] = {}
         self._redis: Any = None
+        self._frame_ts: datetime | None = None
+        self._alive_ids: set[int] = set()
 
         if self.backend == "plateocr":
             from ocr_engine.plateocr_backend import PlateOCRReader, ensure_plateocr_available
@@ -364,6 +367,8 @@ class OCRPipeline:
                 min_ocr_conf=settings.plateocr_min_ocr_conf,
                 ocr_config=settings.plateocr_ocr_config or None,
                 plate_format=settings.plateocr_plate_format or None,
+                tta=settings.plateocr_tta,
+                bbox_pad=settings.plateocr_bbox_pad,
             )
             logger.info(
                 "OCR pipeline backend=plateocr (det=%s ocr=%s format=%s bytetrack=%s)",
@@ -387,12 +392,19 @@ class OCRPipeline:
         reconnect: bool | None = None,
         reconnect_delay: float = 2.0,
         annotate_out: str | None = None,
+        stride: int | None = None,
+        source_start: datetime | None = None,
     ) -> int:
         """Process a video file or RTSP stream.
 
         RTSP sources reconnect by default; file sources do not.
         If ``annotate_out`` is set, write an MP4 with boxes, track IDs, and OCR text.
+        ``stride`` processes every Nth frame (default ``OCR_FRAME_STRIDE``).
+        Event timestamps are capture times: wall clock for live streams, and
+        ``source_start`` (default: now) + the frame's position for files.
         """
+        stride = max(1, int(stride or getattr(self.settings, "ocr_frame_stride", 1) or 1))
+        file_start = source_start or datetime.now(UTC)
         self.publisher.connect()
         self.byte_tracker.reset()
         is_stream = str(source).lower().startswith(("rtsp://", "http://", "https://"))
@@ -431,6 +443,15 @@ class OCRPipeline:
                         emptied = False
                         do_reconnect = False
                         break
+                    if (frame_idx - 1) % stride:
+                        if self._annotate_writer is not None:
+                            self._annotate_writer.write(self._draw_annotations(frame))
+                        continue
+                    if is_stream:
+                        self._frame_ts = datetime.now(UTC)
+                    else:
+                        pos_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+                        self._frame_ts = file_start + timedelta(milliseconds=pos_ms)
                     if self.backend == "plateocr":
                         self._process_frame_plateocr(frame)
                     else:
@@ -571,6 +592,7 @@ class OCRPipeline:
         img = cv2.imread(source)
         if img is None:
             raise RuntimeError(f"Cannot read image: {source}")
+        self._frame_ts = datetime.now(UTC)
         hits = self.plateocr_reader.read(img)
         emitted = 0
         current_ids: set[int] = set()
@@ -595,6 +617,7 @@ class OCRPipeline:
                     last_bbox=hit.bbox,
                     last_text=hit.text,
                     last_ocr_conf=float(hit.ocr_confidence),
+                    last_seen_ts=self._frame_ts,
                 )
                 self.tracks[state.track_id] = state
                 current_ids.add(state.track_id)
@@ -616,6 +639,7 @@ class OCRPipeline:
         if self.use_bytetrack:
             dets = [(h.bbox, float(h.det_confidence)) for h in hits]
             tracks = self.byte_tracker.update(dets)
+            self._alive_ids = self.byte_tracker.alive_ids()
             # Map ByteTrack outputs → OCR hits via det_index (preferred) or IoU.
             for tout in tracks:
                 hit = None
@@ -684,20 +708,25 @@ class OCRPipeline:
         crop = frame[max(0, y1) : min(frame_h, y2), max(0, x1) : min(frame_w, x2)]
         enhanced_text = hit.text
         if crop.size:
-            enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
-            try:
-                re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
-                if re_text and re_conf >= hit.ocr_confidence - 1e-6:
-                    enhanced_text = re_text
-                    probs = re_probs or [re_conf] * max(1, len(re_text))
-                    quality = max(quality, float(re_conf))
-            except Exception:
-                logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
+            # Re-read an enhanced crop only when the first read is weak: doing it for every
+            # plate on every frame doubled OCR cost for reads that were already confident.
+            if hit.ocr_confidence < CONFIDENCE_THRESHOLD:
+                enhanced = enhance_plate(crop, quality, hit.ocr_confidence, self.enhancer)
+                try:
+                    re_text, re_conf, re_probs = self.plateocr_reader.read_crop(enhanced)
+                    if re_text and re_conf >= hit.ocr_confidence - 1e-6:
+                        enhanced_text = re_text
+                        probs = re_probs or [re_conf] * max(1, len(re_text))
+                        quality = max(quality, float(re_conf))
+                except Exception:
+                    logger.debug("PlateOCR re-read after enhance failed", exc_info=True)
+            # Evidence image: the unmodified camera pixels, never the sharpened copy.
             if quality >= state.best_quality:
                 state.best_quality = quality
-                state.best_crop = enhanced.copy()
+                state.best_crop = crop.copy()
         state.last_text = enhanced_text
         state.last_ocr_conf = float(statistics.mean(probs)) if probs else float(hit.ocr_confidence)
+        state.last_seen_ts = self._frame_ts
         state.frame_reads.append(FrameRead(text=enhanced_text, char_probs=probs, quality=quality))
 
     def _process_frame_legacy(self, frame: np.ndarray) -> None:
@@ -752,6 +781,7 @@ class OCRPipeline:
             state.frame_reads.append(
                 FrameRead(text=rec2.text, char_probs=rec2.char_probs, quality=quality)
             )
+            state.last_seen_ts = self._frame_ts
             if quality > state.best_quality:
                 state.best_quality = quality
                 state.best_crop = rectified.copy()
@@ -759,9 +789,20 @@ class OCRPipeline:
         self._active_ids = current_ids
 
     def _finalize_stale_tracks(self) -> int:
+        """Emit and forget tracks that have ended.
+
+        With ByteTrack (plateocr backend), a track missing from this frame may still be
+        re-matched with the same ID for ``track_buffer`` frames, so it only ends once the tracker
+        drops it. Finalizing on the first missed frame split one vehicle into several events.
+        """
+        still_tracked = (
+            self._alive_ids
+            if self.backend == "plateocr" and self.use_bytetrack
+            else self._active_ids
+        )
         emitted = 0
         for tid, state in list(self.tracks.items()):
-            if tid in self._active_ids:
+            if tid in still_tracked:
                 continue
             if (
                 state.frames_seen >= self.FUSION_MIN_FRAMES
@@ -802,7 +843,7 @@ class OCRPipeline:
         read = PlateRead(
             event_id=event_id,
             camera_id=self.camera_id,
-            ts=datetime.now(UTC),
+            ts=state.last_seen_ts or datetime.now(UTC),
             plate_raw=fused.text,
             plate_norm=grammar.norm,
             plate_valid=grammar.valid,

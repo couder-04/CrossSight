@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from datetime import UTC, datetime
 
 import click
 from anpr_common.config import get_settings
@@ -45,6 +46,24 @@ def main() -> None:
     default=None,
     help="Format-constrained decoding (india-v1 defaults to india)",
 )
+@click.option(
+    "--stride",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Process every Nth frame (default: OCR_FRAME_STRIDE / 1)",
+)
+@click.option(
+    "--start-time",
+    type=click.DateTime(formats=["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]),
+    default=None,
+    help="Recording start time of a video file, UTC (event ts = start + frame offset)",
+)
+@click.option(
+    "--annotate-out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Write an annotated MP4 (boxes, track IDs, OCR text) to this path",
+)
 def run_cmd(
     source: str,
     camera_id: str,
@@ -55,6 +74,9 @@ def run_cmd(
     lanes: int,
     ocr_model: str | None,
     plate_format: str | None,
+    stride: int | None,
+    start_time: datetime | None,
+    annotate_out: str | None,
 ) -> None:
     """Run the video OCR pipeline on a file or RTSP stream."""
     settings = get_settings()
@@ -74,7 +96,13 @@ def run_cmd(
         num_lanes=lanes,
     )
     try:
-        count = pipeline.run(source, max_frames=max_frames)
+        count = pipeline.run(
+            source,
+            max_frames=max_frames,
+            annotate_out=annotate_out,
+            stride=stride,
+            source_start=start_time.replace(tzinfo=UTC) if start_time else None,
+        )
         click.echo(f"Emitted {count} plate read(s)")
     except KeyboardInterrupt:
         click.echo("Interrupted", err=True)

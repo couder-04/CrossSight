@@ -182,6 +182,15 @@ class ByteTracker:
         self._next_id = 1
         self.frame_id = 0
 
+    def alive_ids(self) -> set[int]:
+        """IDs the tracker still holds: matched this frame, or lost but within ``track_buffer``.
+
+        ``update`` only returns tracks matched in the current frame. A track missing from one
+        frame's output is not finished; it can be re-matched with the same ID until it has been
+        lost for more than ``track_buffer`` frames.
+        """
+        return {t.track_id for t in self._tracked} | {t.track_id for t in self._lost}
+
     def _new_track(self, box: np.ndarray, score: float, det_index: int) -> _STrack:
         mean, cov = self._kf.initiate(_xyxy_to_xyah(box))
         tr = _STrack(
