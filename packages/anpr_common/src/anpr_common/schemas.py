@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -10,6 +11,9 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
+_bbox_rejects = 0
 
 
 class Direction(str, Enum):
@@ -89,8 +93,21 @@ class PlateRead(BaseModel):
     crop_key: str | None = None
     source: Literal["ocr", "simulator"] = "simulator"
     track_id: int | None = None
-    bbox: list[float] | None = None
+    bbox: tuple[float, float, float, float] | None = None
     source_video_key: str | None = None
+
+    @field_validator("bbox", mode="before")
+    @classmethod
+    def bbox_xyxy(cls, value: Any) -> tuple[float, float, float, float] | None:
+        global _bbox_rejects
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)) and len(value) == 4:
+            return (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+        _bbox_rejects += 1
+        if _bbox_rejects % 1000 == 0:
+            logger.info("rejected %s plate bboxes that were not x1,y1,x2,y2", _bbox_rejects)
+        raise ValueError("bbox must be x1,y1,x2,y2")
 
     @field_validator("plate_norm")
     @classmethod

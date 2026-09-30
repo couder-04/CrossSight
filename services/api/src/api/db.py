@@ -41,6 +41,7 @@ class Camera(Base):
     osm_v: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     ops_config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    speed_limit_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class Zone(Base):

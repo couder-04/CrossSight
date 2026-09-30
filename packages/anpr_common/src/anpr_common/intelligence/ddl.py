@@ -2,6 +2,7 @@
 
 POSTGRES_STATEMENTS = [
     "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS ops_config JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS speed_limit_kmh DOUBLE PRECISION",
     "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS notes TEXT",
     "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS priority TEXT",
     """

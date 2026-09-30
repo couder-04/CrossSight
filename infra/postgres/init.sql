@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     osm_u BIGINT,
     osm_v BIGINT,
     status TEXT NOT NULL DEFAULT 'active',
-    ops_config JSONB NOT NULL DEFAULT '{}'::jsonb
+    ops_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    speed_limit_kmh DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS idx_cameras_geom ON cameras USING GIST (geom);
 

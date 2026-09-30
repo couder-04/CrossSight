@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import get_session_factory
+from api.clickhouse_retention import apply_clickhouse_retention_from_settings
 from api.jobs import apply_stale_job_recovery
 from api.migrate import apply_postgres_upgrade
 from api.routes import (
@@ -60,6 +61,10 @@ async def lifespan(app: FastAPI):
         await apply_postgres_upgrade(session)
         await apply_stale_job_recovery(session, stale_minutes=settings.stale_job_minutes)
         await ensure_seed_users(session, settings)
+    try:
+        apply_clickhouse_retention_from_settings(settings)
+    except Exception:
+        logger.warning("ClickHouse retention TTL was not applied", exc_info=True)
     logger.info("API started; seed users ensured")
     yield
 

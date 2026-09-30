@@ -109,6 +109,14 @@ class WatchlistRule(Rule):
         ]
 
 
+def _clone_speed_threshold(prev_cam: CameraInfo, cur_cam: CameraInfo, settings: Any) -> float:
+    """Use the higher posted limit when both cameras have one; otherwise the urban cap."""
+    urban = float(settings.max_urban_speed_kmh)
+    if prev_cam.speed_limit_kmh is not None and cur_cam.speed_limit_kmh is not None:
+        urban = max(prev_cam.speed_limit_kmh, cur_cam.speed_limit_kmh, urban)
+    return urban * 1.5
+
+
 class ClonedPlateRule(Rule):
     name = "cloned_plate"
 
@@ -134,7 +142,7 @@ class ClonedPlateRule(Rule):
         if elapsed <= 0:
             return []
         speed_kmh = (dist / elapsed) * 3.6
-        threshold = ctx.settings.max_urban_speed_kmh * 1.5
+        threshold = _clone_speed_threshold(prev_cam, cur_cam, ctx.settings)
         if speed_kmh <= threshold:
             return []
         return [

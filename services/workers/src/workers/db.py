@@ -22,6 +22,7 @@ class CameraInfo:
     heading_deg: float
     allowed_direction: str | None
     lanes: int = 2
+    speed_limit_kmh: float | None = None
 
 
 @dataclass(frozen=True)
@@ -275,7 +276,7 @@ async def load_cameras(pool: asyncpg.Pool) -> dict[str, CameraInfo]:
     rows = await pool.fetch(
         """
         SELECT id, ST_Y(geom) AS lat, ST_X(geom) AS lng,
-               heading_deg, allowed_direction, lanes
+               heading_deg, allowed_direction, lanes, speed_limit_kmh
         FROM cameras
         """
     )
@@ -287,6 +288,7 @@ async def load_cameras(pool: asyncpg.Pool) -> dict[str, CameraInfo]:
             heading_deg=float(r["heading_deg"]),
             allowed_direction=r["allowed_direction"],
             lanes=int(r["lanes"] or 2),
+            speed_limit_kmh=float(r["speed_limit_kmh"]) if r["speed_limit_kmh"] is not None else None,
         )
         for r in rows
     }

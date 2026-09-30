@@ -42,7 +42,7 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 | Shared platform | Indian plate grammar, fuzzy matching, schemas for reads / alerts (incl. `route_anomaly`) / flow (lane + congestion_index) |
 | Infrastructure | Docker: Redpanda, ClickHouse, PostGIS, Redis, MinIO. Makefile: seed, simulate, tests, eval, fleet OCR |
 | Simulator | Synthetic city, ~60 cameras, scripted watchlist / clone / convoy / loiter / wrong-way / geofence cases |
-| Workers | Ingest, analytics (per-lane flow, congestion, OD, route-density, bottlenecks), alerts (watchlist, clone, convoy, loiter, geofence, wrong-way, **route anomaly**, FileRegistry mismatch) |
+| Workers | Ingest, analytics (per-lane flow, congestion, OD, route-density, bottlenecks), alerts (watchlist, clone, convoy, loiter, geofence, wrong-way, **route anomaly**, FileRegistry mismatch (when `REGISTRY_PATH` set; noop otherwise)) |
 | API | Trajectory + audit/RBAC, heatmap/flow/segments/OD/bottlenecks/anomalies/**route-density**, alerts workflow, **`GET /crops`** |
 | Dashboard | `/live` heatmap + route-density + speed KPI; `/track` path + **crop thumbs**; `/analytics`; `/alerts` incl. route anomaly; `/admin` |
 | OCR engine | PlateOCR **`india-v1`** (default) + Indian format decode, CLAHE/classical deblur, lane attribution, multi-frame fusion, fleet CLI + RTSP reconnect; legacy YOLO+PARSeq |

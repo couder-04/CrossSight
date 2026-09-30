@@ -8,3 +8,8 @@
 - fix: media uploads stream to disk in 1 MiB chunks and reject bodies over `MAX_UPLOAD_BYTES`.
 - fix: production boots no longer overwrite an existing seed user's password.
 - fix: dashboard session cookies are HttpOnly, SameSite=Lax, and Secure only in production.
+- chore: apply `RAW_RETENTION_DAYS` to the ClickHouse reads TTL on API startup.
+- chore: note that FileRegistry mismatch runs only when `REGISTRY_PATH` is set.
+- chore: pin Python to `>=3.11,<3.13`.
+- chore: cloned-plate alerts use a per-camera speed limit when both cameras have one.
+- chore: reject plate bounding boxes that are not four coordinates.

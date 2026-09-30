@@ -216,6 +216,23 @@ async def test_watchlist_exact_includes_crop_key():
     assert alerts[0].evidence["reads"][0]["crop_key"] == "cam-1/abc.jpg"
 
 
+@pytest.mark.asyncio
+async def test_cloned_plate_respects_camera_speed_limit():
+    cameras = {
+        "cam-1": CameraInfo("cam-1", 18.5, 73.8, 0.0, "N", speed_limit_kmh=120.0),
+        "cam-2": CameraInfo("cam-2", 18.51, 73.81, 90.0, "E", speed_limit_kmh=120.0),
+    }
+    # 1500 m in 36 s is 150 km/h. Posted limits of 120 raise the clone threshold to 180.
+    ctx = _ctx(
+        cameras=cameras,
+        settings=SimpleNamespace(max_urban_speed_kmh=80.0),
+        pair_distances={("cam-1", "cam-2"): 1500.0},
+        last_seen=AsyncMock(return_value=("cam-1", datetime(2025, 6, 1, 11, 59, 24, tzinfo=UTC), 0.95)),
+    )
+    alerts = await ClonedPlateRule().evaluate(_read(camera="cam-2"), ctx)
+    assert alerts == []
+
+
 def test_alert_deduper_within_10_minutes():
     deduper = AlertDeduper()
     from anpr_common.schemas import Alert, AlertSeverity

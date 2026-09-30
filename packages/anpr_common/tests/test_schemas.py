@@ -4,6 +4,9 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from anpr_common.schemas import Alert, FlowWindow, PlateRead, export_json_schemas
 
 
@@ -54,6 +57,20 @@ def test_flow_window_roundtrip():
     )
     restored = FlowWindow.model_validate_json(fw.model_dump_json())
     assert restored.volume == 10
+
+
+def test_bbox_must_be_four_floats():
+    with pytest.raises(ValidationError):
+        PlateRead(
+            camera_id="cam-001",
+            ts=datetime.now(timezone.utc),
+            plate_raw="MH12DE1433",
+            plate_norm="MH12DE1433",
+            plate_valid=True,
+            plate_format="standard",
+            confidence=0.9,
+            bbox=(1.0, 2.0, 3.0),
+        )
 
 
 def test_export_json_schemas(tmp_path):
