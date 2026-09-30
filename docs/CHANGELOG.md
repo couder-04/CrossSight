@@ -18,3 +18,4 @@
 - chore: run ruff, mypy, pytest, and the dashboard build in CI.
 - chore: clear the first ruff and mypy failures so CI can pass.
 - chore: keep heavy demo video and city-load run logs out of git.
+- refactor: send pipeline events through one emit helper.

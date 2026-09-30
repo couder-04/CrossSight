@@ -252,6 +252,21 @@ class MinioUploader:
         return key
 
 
+def emit(
+    event: dict[str, Any],
+    dry_run: bool,
+    *,
+    producer: Any = None,
+    topic: str = "",
+    key: str | None = None,
+) -> None:
+    """Print one event, or publish it when a Kafka producer is connected."""
+    if dry_run or producer is None:
+        print(json.dumps(event, indent=2) if dry_run else json.dumps(event))
+        return
+    producer.send(topic, key=key, value=event)
+
+
 class EventPublisher:
     def __init__(self, settings: Settings, dry_run: bool = False) -> None:
         self.settings = settings
@@ -274,14 +289,13 @@ class EventPublisher:
             self._producer = None
 
     def publish(self, read: PlateRead) -> None:
-        payload = read.model_dump(mode="json")
-        if self.dry_run:
-            print(json.dumps(payload, indent=2))
-            return
-        if self._producer:
-            self._producer.send(self.settings.topic_reads, key=read.plate_norm, value=payload)
-        else:
-            print(json.dumps(payload))
+        emit(
+            read.model_dump(mode="json"),
+            self.dry_run,
+            producer=self._producer,
+            topic=self.settings.topic_reads,
+            key=read.plate_norm,
+        )
 
     def close(self) -> None:
         if self._producer:
