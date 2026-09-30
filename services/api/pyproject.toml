@@ -22,6 +22,8 @@ dependencies = [
   "networkx>=3.3",
   "orjson>=3.10",
   "websockets>=12.0",
+  # _transfer_helpers streams uploads with aiofiles; the API image installs only this package.
+  "aiofiles>=25.1.0",
 ]
 
 [project.optional-dependencies]
