@@ -10,10 +10,22 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
-rpk topic create anpr.reads.v1 -p 12 -r 1 -X brokers="${BOOTSTRAP}" || true
-# Widen partitions on existing clusters (no-op if already >= 12)
-rpk topic add-partitions anpr.reads.v1 -n 12 -X brokers="${BOOTSTRAP}" || true
-rpk topic create alerts.v1 -p 6 -r 1 -X brokers="${BOOTSTRAP}" || true
-rpk topic add-partitions alerts.v1 -n 6 -X brokers="${BOOTSTRAP}" || true
-rpk topic create analytics.flow.v1 -p 3 -r 1 -X brokers="${BOOTSTRAP}" || true
+# Create a topic, or widen an existing one to at least TARGET partitions.
+# `rpk topic add-partitions -n N` ADDS N partitions every time it runs, so it must only be
+# called with the missing count; calling it unconditionally grew the topics on every start.
+ensure_topic() {
+  local topic="$1" target="$2"
+  rpk topic create "${topic}" -p "${target}" -r 1 -X brokers="${BOOTSTRAP}" >/dev/null 2>&1 || true
+  local current
+  current=$(rpk topic describe "${topic}" -p -X brokers="${BOOTSTRAP}" | tail -n +2 | grep -c . || true)
+  if [ "${current}" -lt "${target}" ]; then
+    rpk topic add-partitions "${topic}" -n "$((target - current))" -X brokers="${BOOTSTRAP}"
+    current="${target}"
+  fi
+  echo "${topic}: ${current} partitions"
+}
+
+ensure_topic anpr.reads.v1 12
+ensure_topic alerts.v1 6
+ensure_topic analytics.flow.v1 3
 echo "Topics ready."
