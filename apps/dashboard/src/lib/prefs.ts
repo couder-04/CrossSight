@@ -18,7 +18,7 @@ export interface Prefs {
   liveSidebar: LiveSidebarPrefs;
 }
 
-const defaults: Prefs = {
+export const defaultPrefs: Prefs = {
   sidebarCollapsed: false,
   audio: "alerts-only",
   density: "comfortable",
@@ -30,20 +30,20 @@ const listeners = new Set<Listener>();
 
 function merge(raw: Partial<Prefs> | null): Prefs {
   return {
-    ...defaults,
+    ...defaultPrefs,
     ...raw,
-    liveSidebar: { ...defaults.liveSidebar, ...(raw?.liveSidebar ?? {}) },
+    liveSidebar: { ...defaultPrefs.liveSidebar, ...(raw?.liveSidebar ?? {}) },
   };
 }
 
 export function getPrefs(): Prefs {
-  if (typeof window === "undefined") return defaults;
+  if (typeof window === "undefined") return defaultPrefs;
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return defaults;
+    if (!raw) return defaultPrefs;
     return merge(JSON.parse(raw) as Partial<Prefs>);
   } catch {
-    return defaults;
+    return defaultPrefs;
   }
 }
 

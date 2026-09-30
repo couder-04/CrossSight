@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { navIcons } from "@/components/ui/icons";
 import { NAV_GROUPS, navItemsForRole } from "@/lib/auth";
 import { sourceMode, type SourceMode } from "@/lib/source";
-import { getPrefs, subscribePrefs, updatePrefs, type AudioPref, type Density, type Prefs } from "@/lib/prefs";
+import { defaultPrefs, getPrefs, subscribePrefs, updatePrefs, type AudioPref, type Density, type Prefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import type { NavItem } from "@/lib/auth";
 import type { Role, UserSession } from "@/types";
@@ -24,7 +24,7 @@ export function Sidebar({
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
   const [mode, setMode] = useState<SourceMode>("sim");
-  const [prefs, setPrefs] = useState<Prefs>(getPrefs);
+  const [prefs, setPrefs] = useState<Prefs>(defaultPrefs);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {

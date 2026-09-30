@@ -24,9 +24,10 @@ export function TopStatusBar({
   const [system, setSystem] = useState<SystemState>("degraded");
   const [cameras, setCameras] = useState({ healthy: 0, total: 0 });
   const [socketState, setSocketState] = useState<SocketState>("reconnecting");
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
+    setNow(new Date());
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -72,7 +73,7 @@ export function TopStatusBar({
     };
   }, []);
 
-  const clock = formatDualClock(now);
+  const clock = now ? formatDualClock(now) : null;
   const systemTone = system === "healthy" ? "text-success" : system === "degraded" ? "text-warning" : "text-danger";
   const socketTone = socketState === "live" ? "text-success" : socketState === "reconnecting" ? "text-warning" : "text-danger";
 
@@ -114,7 +115,7 @@ export function TopStatusBar({
           </span>
         )}
       </button>
-      <span className="text-muted">IST {clock.ist} · UTC {clock.utc}</span>
+      <span className="text-muted">{clock ? `IST ${clock.ist} · UTC ${clock.utc}` : "IST --:-- · UTC --:--"}</span>
     </header>
   );
 }
