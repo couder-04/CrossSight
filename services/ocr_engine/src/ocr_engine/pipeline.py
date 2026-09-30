@@ -274,7 +274,7 @@ class EventPublisher:
         self._producer: Any = None
 
     def connect(self) -> None:
-        if self.dry_run:
+        if self.dry_run or self._producer is not None:
             return
         try:
             from kafka import KafkaProducer
@@ -301,6 +301,7 @@ class EventPublisher:
         if self._producer:
             self._producer.flush()
             self._producer.close()
+            self._producer = None
 
 
 def build_recognizer(settings: Settings, use_mock: bool = False) -> Recognizer:
@@ -387,14 +388,22 @@ class OCRPipeline:
         reconnect: bool | None = None,
         reconnect_delay: float = 2.0,
         annotate_out: str | None = None,
+        ocr_every: int = 1,
+        release: bool = True,
     ) -> int:
         """Process a video file or RTSP stream.
 
         RTSP sources reconnect by default; file sources do not.
         If ``annotate_out`` is set, write an MP4 with boxes, track IDs, and OCR text.
+        ``ocr_every`` runs detection on every Nth frame (live preview still updates).
+        ``release=False`` keeps the Kafka publisher open so the same pipeline can
+        read the next file without reloading models.
         """
         self.publisher.connect()
         self.byte_tracker.reset()
+        self.tracks.clear()
+        self._active_ids.clear()
+        self._next_track_id = 1
         is_stream = str(source).lower().startswith(("rtsp://", "http://", "https://"))
         do_reconnect = is_stream if reconnect is None else reconnect
         emitted = 0
@@ -431,10 +440,11 @@ class OCRPipeline:
                         emptied = False
                         do_reconnect = False
                         break
-                    if self.backend == "plateocr":
-                        self._process_frame_plateocr(frame)
-                    else:
-                        self._process_frame_legacy(frame)
+                    if ocr_every <= 1 or frame_idx % ocr_every == 0:
+                        if self.backend == "plateocr":
+                            self._process_frame_plateocr(frame)
+                        else:
+                            self._process_frame_legacy(frame)
                     self._publish_live_frame(frame)
                     if self._annotate_writer is not None:
                         self._annotate_writer.write(self._draw_annotations(frame))
@@ -452,11 +462,13 @@ class OCRPipeline:
                 time.sleep(reconnect_delay)
         finally:
             emitted += self._finalize_all_tracks()
-            self.publisher.close()
+            if release:
+                self.publisher.close()
             if self._annotate_writer is not None:
                 self._annotate_writer.release()
                 self._annotate_writer = None
-                logger.info("Wrote annotated video → %s", annotate_out)
+                if annotate_out:
+                    logger.info("Wrote annotated video → %s", annotate_out)
         return emitted
 
     def _live_tracks(self) -> list[dict[str, Any]]:

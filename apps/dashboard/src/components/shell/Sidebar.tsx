@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { navIcons } from "@/components/ui/icons";
 import { NAV_GROUPS, navItemsForRole } from "@/lib/auth";
+import { sourceMode, type SourceMode } from "@/lib/source";
 import { getPrefs, subscribePrefs, updatePrefs, type AudioPref, type Density, type Prefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import type { NavItem } from "@/lib/auth";
@@ -22,6 +23,7 @@ export function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
+  const [mode, setMode] = useState<SourceMode>("sim");
   const [prefs, setPrefs] = useState<Prefs>(getPrefs);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -33,6 +35,7 @@ export function Sidebar({
   }, []);
 
   useEffect(() => {
+    setMode(sourceMode());
     setPrefs(getPrefs());
     return subscribePrefs(setPrefs);
   }, []);
@@ -84,7 +87,7 @@ export function Sidebar({
         </nav>
         <UserMenu user={user} prefs={prefs} collapsed={collapsed} onLogout={logout} />
         <p className={cn("px-3 py-2 text-[10px] text-muted border-t border-border", collapsed && "text-center px-0")}>
-          {collapsed ? "v" : `v${process.env.NEXT_PUBLIC_VERSION ?? "0.0.0"}`}
+          {collapsed ? "v" : mode === "video" ? "Camera videos" : "Simulated city"}
         </p>
       </aside>
 

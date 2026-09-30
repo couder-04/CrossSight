@@ -11,17 +11,19 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"sim" | "video" | null>(null);
 
-  async function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const mode = submitter?.value === "video" ? "video" : "sim";
+    setLoading(mode);
     setError(null);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, mode }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -33,19 +35,19 @@ export default function LoginPage() {
           JSON.stringify({ last_login_at: body.last_login_at, last_login_ip: body.last_login_ip ?? null }),
         );
       }
-      const from = params.get("from") ?? "/live";
-      router.push(from);
+      const dest = body.mode === "video" ? "/wall" : (params.get("from") ?? "/live");
+      router.push(dest);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-surface-raised p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-lg border border-border bg-surface-raised p-6 shadow-xl">
         <div className="mb-6 text-center">
           <p className="font-mono text-2xl text-accent tracking-tight">ANPR</p>
           <p className="text-sm text-muted mt-1">Control room sign-in</p>
@@ -68,9 +70,24 @@ export default function LoginPage() {
             required
           />
           {error && <p className="text-danger text-sm">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Signing in…" : "Sign in"}
-          </Button>
+          <div className="space-y-2 pt-1">
+            <Button type="submit" value="sim" className="w-full flex-col gap-0.5 py-3 h-auto" disabled={loading !== null}>
+              <span>{loading === "sim" ? "Signing in…" : "Simulated city"}</span>
+              <span className="text-[11px] font-normal opacity-80">Synthetic cameras, traffic, and scripted alerts</span>
+            </Button>
+            <Button
+              type="submit"
+              value="video"
+              variant="secondary"
+              className="w-full flex-col gap-0.5 py-3 h-auto"
+              disabled={loading !== null}
+            >
+              <span>{loading === "video" ? "Starting cameras…" : "Camera videos"}</span>
+              <span className="text-[11px] font-normal text-muted">
+                Traffic footage as live cameras. Plates are read from the video, with no simulated history.
+              </span>
+            </Button>
+          </div>
         </form>
 
         {process.env.NEXT_PUBLIC_APP_ENV === "dev" && (

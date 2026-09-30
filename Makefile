@@ -1,4 +1,4 @@
-.PHONY: up down seed simulate backfill test types eval eval-plateocr fleet-ocr prove-scenarios city-load ops-check prod-up lint install workers workers-alerts api
+.PHONY: up down seed simulate backfill test types eval eval-plateocr fleet-ocr video-city prove-scenarios city-load ops-check prod-up lint install workers workers-alerts api
 
 UV ?= uv
 COMPOSE ?= docker compose
@@ -63,6 +63,9 @@ ops-check:
 
 fleet-ocr:
 	$(UV) run python -m ocr_engine.cli fleet --config services/ocr_engine/config/cameras.example.json --dry-run
+
+video-city:
+	$(UV) run python -m ocr_engine.cli video-city --config data/drive_cameras/fleet.json
 
 lint:
 	$(UV) run ruff check packages services scripts tests
