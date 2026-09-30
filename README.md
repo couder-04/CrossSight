@@ -29,7 +29,7 @@ flowchart LR
 
 ## Dashboard
 
-Control-room UI (Pune demo). Open [http://localhost:3000](http://localhost:3000) after the quickstart below.
+Control-room UI (Pune demo). Open [https://crosssight.vercel.app/](https://crosssight.vercel.app/).
 
 **Live** (`/live`) — city map, live plate reads, critical alerts, speed, and congested segments.
 
@@ -134,7 +134,7 @@ make simulate
 cd apps/dashboard && npx pnpm@9 dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — login with:
+Open [https://crosssight.vercel.app/](https://crosssight.vercel.app/) — login with:
 
 
 | Role     | User     | Password    |
