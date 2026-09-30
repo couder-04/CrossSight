@@ -12,7 +12,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [bgOk, setBgOk] = useState(true);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -45,11 +44,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4">
-      <img src="/login-bg.jpg" alt="" className="hidden" onError={() => setBgOk(false)} />
-      {bgOk && <div className="absolute inset-0 bg-cover bg-center login-bg" />}
-      <div className={`absolute inset-0 ${bgOk ? "bg-surface/85 backdrop-blur-sm" : "bg-surface"}`} />
-      <div className="relative w-full max-w-sm rounded-lg border border-border bg-surface-raised p-6 shadow-xl">
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-surface-raised p-6 shadow-xl">
         <div className="mb-6 text-center">
           <p className="font-mono text-2xl text-accent tracking-tight">ANPR</p>
           <p className="text-sm text-muted mt-1">Control room sign-in</p>
