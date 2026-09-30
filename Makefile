@@ -47,6 +47,7 @@ eval-plateocr:
 benchmark-ocr:
 	mkdir -p reports
 	$(UV) run python scripts/run_ocr_benchmarks.py
+	$(UV) run python scripts/render_reports.py
 
 prove-scenarios:
 	mkdir -p reports

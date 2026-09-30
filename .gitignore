@@ -1,6 +1,8 @@
 models/
 reports/*.md
 !reports/.gitkeep
+!reports/ocr_benchmark.md
+!reports/FINAL_RESULTS.md
 __pycache__/
 *.py[cod]
 .pytest_cache/

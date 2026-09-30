@@ -63,7 +63,7 @@ The spec MVP runs end to end on simulated reads. Real-world OCR measurement and 
 
 ## Measured OCR claims (2026-09-30)
 
-Full tables: [`reports/ocr_benchmark.md`](reports/ocr_benchmark.md) · narrative: [`reports/CLAIMS.md`](reports/CLAIMS.md) · reproduce: `uv run python scripts/run_ocr_benchmarks.py`
+Full tables: [`reports/ocr_benchmark.md`](reports/ocr_benchmark.md) · reproduce: `uv run python scripts/run_ocr_benchmarks.py`
 
 | Claim | Model | Dataset | Exact | Found | Char | n |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
@@ -210,7 +210,6 @@ GPU profile: `docker compose --profile gpu up ocr-engine-gpu` (NVIDIA runtime). 
 
 ```bash
 make eval
-# → reports/ocr_eval.md
 ```
 
 - Input CSV: `image_path, gt_plate, tags` (day, night, rain, fog, angle_gt30, blur, dirty, damaged, two_row)
