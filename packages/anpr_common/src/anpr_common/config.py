@@ -78,7 +78,7 @@ class Settings(BaseSettings):
         alias="PLATEOCR_DETECTOR",
     )
     plateocr_ocr_model: str = Field(
-        default="india-v1",
+        default="india-v1.1",
         alias="PLATEOCR_OCR_MODEL",
     )
     plateocr_device: str = Field(default="auto", alias="PLATEOCR_DEVICE")

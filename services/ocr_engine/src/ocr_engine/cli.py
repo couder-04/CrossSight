@@ -38,13 +38,13 @@ def main() -> None:
 @click.option(
     "--ocr-model",
     default=None,
-    help="OCR model: india-v1 (default), cct-s-v2-global-model, or path to .onnx",
+    help="OCR model: india-v1.1 (default), india-v1, cct-s-v2-global-model, or path to .onnx",
 )
 @click.option(
     "--plate-format",
     type=click.Choice(["india", "none"], case_sensitive=False),
     default=None,
-    help="Format-constrained decoding (india-v1 defaults to india)",
+    help="Format-constrained decoding (india-v1.x defaults to india)",
 )
 @click.option(
     "--stride",
