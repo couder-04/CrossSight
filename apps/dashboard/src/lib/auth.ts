@@ -3,6 +3,17 @@ import type { Role, UserSession } from "@/types";
 export const AUTH_COOKIE = "anpr_token";
 export const USER_COOKIE = "anpr_user";
 
+/** Session cookies: HttpOnly always, Secure only when the dashboard is served over HTTPS. */
+export function sessionCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge,
+  };
+}
+
 export function canAccessTrack(role: Role): boolean {
   return role === "admin" || role === "operator";
 }

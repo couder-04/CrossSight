@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { api } from "@/lib/api";
-import { AUTH_COOKIE, USER_COOKIE } from "@/lib/auth";
+import { AUTH_COOKIE, USER_COOKIE, sessionCookieOptions } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -17,24 +17,12 @@ export async function POST(request: Request) {
       role: result.role,
     });
 
-    response.cookies.set(AUTH_COOKIE, result.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 8,
-    });
-
+    const options = sessionCookieOptions(60 * 60 * 8);
+    response.cookies.set(AUTH_COOKIE, result.access_token, options);
     response.cookies.set(
       USER_COOKIE,
       JSON.stringify({ username: result.username, role: result.role }),
-      {
-        httpOnly: false,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 8,
-      },
+      options,
     );
 
     return response;

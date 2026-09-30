@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE, USER_COOKIE } from "@/lib/auth";
+import { AUTH_COOKIE, USER_COOKIE, sessionCookieOptions } from "@/lib/auth";
 
 export async function POST() {
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(AUTH_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
-  response.cookies.set(USER_COOKIE, "", { path: "/", maxAge: 0 });
+  const options = sessionCookieOptions(0);
+  response.cookies.set(AUTH_COOKIE, "", options);
+  response.cookies.set(USER_COOKIE, "", options);
   return response;
 }
