@@ -20,7 +20,9 @@ if TYPE_CHECKING:
     from simulator.cameras import Camera
     from simulator.scenarios import InjectedEvent
     from simulator.trips import TraversalEvent
-    from simulator.vehicles import Vehicle
+
+from simulator.frames import FramePublisher
+from simulator.vehicles import Vehicle
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +161,7 @@ class ReadEmitter:
         self._batch: list[PlateRead] = []
         self.emitted = 0
         self.skipped = 0
+        self._frames = FramePublisher(settings)
 
         if output_file:
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -203,6 +206,7 @@ class ReadEmitter:
             self._producer.close()
         if self._file_handle:
             self._file_handle.close()
+        self._frames.close()
 
     def flush(self) -> None:
         if self._batch and self._ch_client:
@@ -211,7 +215,7 @@ class ReadEmitter:
         if self._producer:
             self._producer.flush()
 
-    def emit(self, read: PlateRead) -> None:
+    def emit(self, read: PlateRead, camera_name: str | None = None) -> None:
         payload = read.model_dump(mode="json")
         if self.callback:
             self.callback(read)
@@ -228,6 +232,7 @@ class ReadEmitter:
             if len(self._batch) >= 500:
                 self._write_clickhouse_batch(self._batch)
                 self._batch.clear()
+        self._frames.publish(read, camera_name=camera_name)
         self.emitted += 1
 
     def _write_clickhouse_batch(self, reads: list[PlateRead]) -> None:
@@ -305,6 +310,6 @@ def process_traversal(
         rng,
     )
     if read:
-        emitter.emit(read)
+        emitter.emit(read, camera_name=event.camera.name)
     else:
         emitter.skipped += 1

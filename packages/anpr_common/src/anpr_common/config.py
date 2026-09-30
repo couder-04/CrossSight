@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     h3_heatmap_res: int = Field(default=8, alias="H3_HEATMAP_RES")
     h3_od_res: int = Field(default=7, alias="H3_OD_RES")
     sim_speed: float = Field(default=60.0, alias="SIM_SPEED")
+    sim_publish_frames: bool = Field(default=True, alias="SIM_PUBLISH_FRAMES")
     app_env: Literal["dev", "staging", "prod"] = Field(default="dev", alias="APP_ENV")
 
     kafka_bootstrap: str = Field(default="localhost:19092", alias="KAFKA_BOOTSTRAP")

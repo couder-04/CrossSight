@@ -179,7 +179,7 @@ def run_simulation(
                 cam = cam_by_id[payload.camera_id]
                 vehicle = vehicles_by_plate.get(payload.plate_norm)
                 read = build_injected_read(payload, cam, vehicle, rng)
-                emitter.emit(read)
+                emitter.emit(read, camera_name=cam.name)
 
             if backfill_days and idx % 5000 == 0 and idx > 0:
                 emitter.flush()
