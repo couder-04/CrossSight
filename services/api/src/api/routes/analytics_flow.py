@@ -1,103 +1,16 @@
-"""Traffic analytics endpoints."""
+"""Flow, segment, bottleneck, anomaly, and route-density analytics."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
-from anpr_common.geo import h3_to_str
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query
 
-from api.deps import ClickHouseDep, SettingsDep, UserDep
+from api.deps import ClickHouseDep, UserDep
+from api.routes.analytics_heatmap import _parse_window
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
-
-
-def _parse_window(window: str) -> timedelta:
-    window = window.strip().lower()
-    if window.endswith("m"):
-        return timedelta(minutes=int(window[:-1]))
-    if window.endswith("h"):
-        return timedelta(hours=int(window[:-1]))
-    if window.endswith("d"):
-        return timedelta(days=int(window[:-1]))
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid window format")
-
-
-def _heatmap_cells(ch, start: datetime, end: datetime) -> list[dict[str, Any]]:
-    """Prefer heatmap_1min; fall back to aggregating anpr_reads."""
-    query = """
-        SELECT h3_cell, sum(count) AS total
-        FROM heatmap_1min
-        WHERE minute >= {start:DateTime} AND minute <= {end:DateTime}
-        GROUP BY h3_cell
-        ORDER BY total DESC
-    """
-    result = ch.query(
-        query,
-        parameters={
-            "start": start.replace(tzinfo=None) if start.tzinfo else start,
-            "end": end.replace(tzinfo=None) if end.tzinfo else end,
-        },
-    )
-    cells = [
-        {"h3": h3_to_str(int(row[0])), "h3_int": int(row[0]), "count": int(row[1])}
-        for row in result.result_rows
-    ]
-    if cells:
-        return cells
-    fallback = """
-        SELECT h3_r8, count() AS total
-        FROM anpr_reads
-        WHERE ts >= {start:DateTime} AND ts <= {end:DateTime} AND h3_r8 != 0
-        GROUP BY h3_r8
-        ORDER BY total DESC
-    """
-    result = ch.query(
-        fallback,
-        parameters={
-            "start": start.replace(tzinfo=None) if start.tzinfo else start,
-            "end": end.replace(tzinfo=None) if end.tzinfo else end,
-        },
-    )
-    return [
-        {"h3": h3_to_str(int(row[0])), "h3_int": int(row[0]), "count": int(row[1])}
-        for row in result.result_rows
-    ]
-
-
-@router.get("/heatmap")
-async def heatmap(
-    ch: ClickHouseDep,
-    _user: UserDep,
-    window: str = Query("15m"),
-) -> dict[str, Any]:
-    delta = _parse_window(window)
-    end = datetime.now(UTC).replace(second=0, microsecond=0)
-    start = end - delta
-    cells = _heatmap_cells(ch, start, end)
-    stale = False
-    latest_ts: str | None = None
-    # If wall-clock window is empty (common under 60× sim), use latest data window.
-    if not cells:
-        latest = ch.query("SELECT max(ts) FROM anpr_reads")
-        if latest.result_rows and latest.result_rows[0][0] is not None:
-            end_raw = latest.result_rows[0][0]
-            if hasattr(end_raw, "tzinfo") and end_raw.tzinfo is None:
-                end_raw = end_raw.replace(tzinfo=UTC)
-            latest_ts = end_raw.isoformat() if hasattr(end_raw, "isoformat") else str(end_raw)
-            end = end_raw.replace(second=0, microsecond=0) if hasattr(end_raw, "replace") else end_raw
-            start = end - delta
-            cells = _heatmap_cells(ch, start, end)
-            stale = True
-    return {
-        "window": window,
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "cells": cells,
-        "stale": stale,
-        "latest_ts": latest_ts,
-    }
 
 
 @router.get("/flow")
@@ -143,7 +56,12 @@ async def flow(
                 "volume": int(row[9]),
             }
         )
-    return {"camera_id": camera_id, "from": from_ts.isoformat(), "to": to_ts.isoformat(), "windows": rows}
+    return {
+        "camera_id": camera_id,
+        "from": from_ts.isoformat(),
+        "to": to_ts.isoformat(),
+        "windows": rows,
+    }
 
 
 @router.get("/segments")
@@ -212,131 +130,6 @@ def _segment_congestion(ch, at: datetime) -> list[dict[str, Any]]:
     return segments_out
 
 
-@router.get("/od")
-async def od_matrix(
-    ch: ClickHouseDep,
-    settings: SettingsDep,
-    _user: UserDep,
-    hour: int = Query(..., ge=0, le=23),
-    date: str = Query(..., description="YYYY-MM-DD"),
-) -> dict[str, Any]:
-    try:
-        day = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=UTC)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date") from exc
-    hour_dt = day.replace(hour=hour, minute=0, second=0, microsecond=0)
-    hour_naive = hour_dt.replace(tzinfo=None)
-    query = """
-        SELECT origin_h3, dest_h3, sum(trip_count) AS trips
-        FROM od_hourly
-        WHERE toStartOfHour(hour) = {hour:DateTime}
-        GROUP BY origin_h3, dest_h3
-        HAVING trips >= {k:UInt32}
-    """
-    result = ch.query(query, parameters={"hour": hour_naive, "k": settings.od_k_anon})
-    cells = [
-        {
-            "origin_h3": h3_to_str(int(row[0])),
-            "dest_h3": h3_to_str(int(row[1])),
-            "trip_count": int(row[2]),
-        }
-        for row in result.result_rows
-    ]
-    # Fallback: derive OD from raw reads when od_hourly is empty.
-    if not cells:
-        fallback = """
-            SELECT origin, dest, count() AS trips
-            FROM (
-                SELECT
-                    plate_norm,
-                    argMin(h3_r7, ts) AS origin,
-                    argMax(h3_r7, ts) AS dest
-                FROM anpr_reads
-                WHERE ts >= {start:DateTime}
-                  AND ts < {end:DateTime}
-                  AND h3_r7 != 0
-                GROUP BY plate_norm
-                HAVING origin != dest
-            )
-            GROUP BY origin, dest
-            HAVING trips >= {k:UInt32}
-        """
-        end = hour_naive + timedelta(hours=1)
-        result = ch.query(
-            fallback,
-            parameters={"start": hour_naive, "end": end, "k": settings.od_k_anon},
-        )
-        cells = [
-            {
-                "origin_h3": h3_to_str(int(row[0])),
-                "dest_h3": h3_to_str(int(row[1])),
-                "trip_count": int(row[2]),
-            }
-            for row in result.result_rows
-        ]
-    # Day-wide fallback for sparse synthetic demos (still k-anonymous).
-    if not cells:
-        day_start = hour_naive.replace(hour=0)
-        day_end = day_start + timedelta(days=1)
-        day_q = """
-            SELECT origin_h3, dest_h3, sum(trip_count) AS trips
-            FROM od_hourly
-            WHERE hour >= {start:DateTime} AND hour < {end:DateTime}
-            GROUP BY origin_h3, dest_h3
-            HAVING trips >= {k:UInt32}
-        """
-        result = ch.query(
-            day_q,
-            parameters={"start": day_start, "end": day_end, "k": settings.od_k_anon},
-        )
-        cells = [
-            {
-                "origin_h3": h3_to_str(int(row[0])),
-                "dest_h3": h3_to_str(int(row[1])),
-                "trip_count": int(row[2]),
-            }
-            for row in result.result_rows
-        ]
-    if not cells:
-        day_start = hour_naive.replace(hour=0)
-        day_end = day_start + timedelta(days=1)
-        day_reads = """
-            SELECT origin, dest, count() AS trips
-            FROM (
-                SELECT
-                    plate_norm,
-                    argMin(h3_r7, ts) AS origin,
-                    argMax(h3_r7, ts) AS dest
-                FROM anpr_reads
-                WHERE ts >= {start:DateTime}
-                  AND ts < {end:DateTime}
-                  AND h3_r7 != 0
-                GROUP BY plate_norm
-                HAVING origin != dest
-            )
-            GROUP BY origin, dest
-            HAVING trips >= {k:UInt32}
-        """
-        result = ch.query(
-            day_reads,
-            parameters={"start": day_start, "end": day_end, "k": settings.od_k_anon},
-        )
-        cells = [
-            {
-                "origin_h3": h3_to_str(int(row[0])),
-                "dest_h3": h3_to_str(int(row[1])),
-                "trip_count": int(row[2]),
-            }
-            for row in result.result_rows
-        ]
-    return {
-        "date": date,
-        "hour": hour,
-        "k_anonymity": settings.od_k_anon,
-        "cells": cells,
-    }
-
-
 @router.get("/bottlenecks")
 async def bottlenecks(ch: ClickHouseDep, _user: UserDep) -> dict[str, Any]:
     at = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
@@ -373,10 +166,7 @@ async def anomalies(ch: ClickHouseDep, _user: UserDep) -> dict[str, Any]:
         WHERE window_start >= {start:DateTime} - INTERVAL 15 MINUTE
         GROUP BY camera_id
     """
-    current = {
-        row[0]: int(row[1])
-        for row in ch.query(query, parameters={"start": at}).result_rows
-    }
+    current = {row[0]: int(row[1]) for row in ch.query(query, parameters={"start": at}).result_rows}
     baseline_query = """
         SELECT
             camera_id,
@@ -466,9 +256,7 @@ async def route_density(
         ]
     if not corridors:
         # Use latest available window when wall-clock is empty (60× sim).
-        latest = ch.query(
-            "SELECT max(ts) FROM anpr_reads"
-        )
+        latest = ch.query("SELECT max(ts) FROM anpr_reads")
         if latest.result_rows and latest.result_rows[0][0] is not None:
             end_n = latest.result_rows[0][0]
             if hasattr(end_n, "tzinfo") and end_n.tzinfo is not None:

@@ -14,3 +14,4 @@
 - chore: cloned-plate alerts use a per-camera speed limit when both cameras have one.
 - chore: reject plate bounding boxes that are not four coordinates.
 - refactor: split transfer routes into imports, uploads, exports, and evidence.
+- refactor: split analytics routes into heatmap, flow, and origin-destination modules.

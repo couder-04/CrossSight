@@ -16,7 +16,9 @@ from api.jobs import apply_stale_job_recovery
 from api.migrate import apply_postgres_upgrade
 from api.routes import (
     alerts,
-    analytics,
+    analytics_flow,
+    analytics_heatmap,
+    analytics_od,
     audit,
     auth,
     cameras,
@@ -93,7 +95,9 @@ def create_app() -> FastAPI:
     app.include_router(zones.router)
     app.include_router(watchlist.router)
     app.include_router(trajectory.router)
-    app.include_router(analytics.router)
+    app.include_router(analytics_heatmap.router)
+    app.include_router(analytics_flow.router)
+    app.include_router(analytics_od.router)
     app.include_router(alerts.router)
     app.include_router(platform.router)
     app.include_router(imports.router)
