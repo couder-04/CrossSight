@@ -15,3 +15,4 @@
 - chore: reject plate bounding boxes that are not four coordinates.
 - refactor: split transfer routes into imports, uploads, exports, and evidence.
 - refactor: split analytics routes into heatmap, flow, and origin-destination modules.
+- chore: run ruff, mypy, pytest, and the dashboard build in CI.
