@@ -6,3 +6,4 @@
 - fix: dashboard middleware verifies the HS256 session cookie and blocks non-admins from `/admin`.
 - fix: API startup marks stale processing exports and uploads as `worker_lost` and retry requeues them.
 - fix: media uploads stream to disk in 1 MiB chunks and reject bodies over `MAX_UPLOAD_BYTES`.
+- fix: production boots no longer overwrite an existing seed user's password.

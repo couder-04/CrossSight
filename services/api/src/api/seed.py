@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from anpr_common.config import Settings
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import Role, hash_password
 from api.db import User
+
+logger = logging.getLogger(__name__)
 
 
 async def ensure_seed_users(session: AsyncSession, settings: Settings) -> None:
@@ -30,7 +33,13 @@ async def ensure_seed_users(session: AsyncSession, settings: Settings) -> None:
                     role=role.value,
                 )
             )
-        else:
+        elif settings.app_env == "dev":
             existing.password_hash = hash_password(password)
             existing.role = role.value
+        else:
+            logger.warning(
+                "Seed user %s already exists; leaving password and role unchanged while APP_ENV=%s",
+                username,
+                settings.app_env,
+            )
     await session.commit()
