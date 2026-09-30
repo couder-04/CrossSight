@@ -25,6 +25,7 @@ export interface Camera {
   allowed_direction?: string | null;
   status: string;
   volume?: number;
+  has_live_frame?: boolean;
 }
 
 export interface Zone {
@@ -123,7 +124,24 @@ export interface GeoJSONFeatureCollection {
   summary?: TrajectorySummary;
 }
 
-export type WsChannel = "heatmap" | "alerts" | "flow" | "reads";
+export type WsChannel = "heatmap" | "alerts" | "flow" | "reads" | "frames";
+
+export interface FrameTrack {
+  track_id: number;
+  plate_norm: string;
+  vehicle_class: string;
+  bbox: number[];
+  confidence: number;
+  lane?: number | null;
+  direction?: string | null;
+}
+
+export interface FrameNotice {
+  camera_id: string;
+  ts: string;
+  key: string;
+  tracks: FrameTrack[];
+}
 
 export interface LiveRead {
   camera_id: string;

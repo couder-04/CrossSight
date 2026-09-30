@@ -14,6 +14,7 @@ export function canAccessAdmin(role: Role): boolean {
 export function navItemsForRole(role: Role) {
   const items = [
     { href: "/live", label: "Live", roles: ["admin", "operator", "analyst"] as Role[] },
+    { href: "/wall", label: "Wall", roles: ["admin", "operator"] as Role[] },
     { href: "/track", label: "Track", roles: ["admin", "operator"] as Role[] },
     { href: "/flow", label: "Flow", roles: ["admin", "operator", "analyst"] as Role[] },
     { href: "/analytics", label: "Analytics", roles: ["admin", "operator", "analyst"] as Role[] },

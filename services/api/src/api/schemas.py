@@ -34,6 +34,7 @@ class CameraOut(BaseModel):
     osm_u: int | None
     osm_v: int | None
     status: str
+    has_live_frame: bool = False
 
 
 class CameraCreate(BaseModel):

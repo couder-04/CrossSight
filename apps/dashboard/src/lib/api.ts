@@ -83,6 +83,13 @@ export const api = {
     return request<Camera[]>("/cameras", { token });
   },
 
+  cameraFrame(id: string, cacheBust?: number) {
+    const q = cacheBust != null ? `?t=${cacheBust}` : "";
+    return request<{ url: string; key: string }>(
+      `/cameras/${encodeURIComponent(id)}/frame${q}`,
+    );
+  },
+
   createCamera(data: Partial<Camera> & { id: string; name: string; lat: number; lng: number }, token?: string) {
     return request<Camera>("/cameras", { method: "POST", body: JSON.stringify(data), token });
   },

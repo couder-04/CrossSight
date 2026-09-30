@@ -4,6 +4,7 @@ import { PathStyleExtension } from "@deck.gl/extensions";
 import { TripsLayer } from "@deck.gl/geo-layers";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { DeckMap } from "@/components/map/DeckMap";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
@@ -34,6 +35,7 @@ interface TripPath {
 }
 
 export function TrackView() {
+  const params = useSearchParams();
   const defaultFrom = () => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -41,7 +43,7 @@ export function TrackView() {
   };
   const defaultTo = () => new Date(Date.now() + 86400000).toISOString().slice(0, 16);
 
-  const [plate, setPlate] = useState("");
+  const [plate, setPlate] = useState(() => params.get("plate") ?? "");
   const [caseId, setCaseId] = useState("");
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);

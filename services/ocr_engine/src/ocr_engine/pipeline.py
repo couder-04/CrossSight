@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import statistics
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from anpr_common.geo import bearing_to_direction
 from anpr_common.grammar import normalize_plate
 from anpr_common.schemas import Direction, PlateFormat, PlateRead, VehicleClass
 
+from ocr_engine.bytetrack import ByteTracker
 from ocr_engine.detect import (
     PlateDetector,
     VehicleDetector,
@@ -32,7 +34,6 @@ from ocr_engine.detect import (
     rectify_plate,
     validate_plate_weights,
 )
-from ocr_engine.bytetrack import ByteTracker
 from ocr_engine.enhance import ClassicalDeblurEnhancer, enhance_plate
 from ocr_engine.fusion import FrameRead, fuse_track_reads
 from ocr_engine.recognize import MockRecognizer, ParseqRecognizer, Recognizer
@@ -119,6 +120,93 @@ def _bbox_center(b: tuple[int, int, int, int]) -> tuple[float, float]:
     return (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
 
+def _ann_get(track: Any, name: str, default: Any = None) -> Any:
+    if isinstance(track, dict):
+        return track.get(name, default)
+    return getattr(track, name, default)
+
+
+def draw_annotations(frame: np.ndarray, tracks: list[Any]) -> np.ndarray:
+    """Draw green boxes, labels, and plate crosshairs. Returns a copy."""
+    out = frame.copy()
+    height, width = out.shape[:2]
+    for track in tracks:
+        bbox = _ann_get(track, "bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+        x1, y1, x2, y2 = (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(width - 1, x2), min(height - 1, y2)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        color = (0, 255, 0)
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+        plate = _ann_get(track, "plate_norm") or "—"
+        klass = _ann_get(track, "vehicle_class") or "vehicle"
+        track_id = _ann_get(track, "track_id", "?")
+        try:
+            conf = float(_ann_get(track, "confidence") or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        parts = [str(plate), str(klass), f"#{track_id}", f"{conf:.2f}"]
+        lane = _ann_get(track, "lane")
+        direction = _ann_get(track, "direction")
+        if lane is not None:
+            parts.append(f"L{lane}")
+        if direction:
+            parts.append(str(direction))
+        label = " • ".join(parts)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        bar_h = th + 8
+        bar_top = y1 - bar_h if y1 - bar_h >= 0 else y1
+        bar_bot = bar_top + bar_h
+        cv2.rectangle(out, (x1, bar_top), (min(width - 1, x1 + tw + 8), bar_bot), color, -1)
+        cv2.putText(
+            out,
+            label,
+            (x1 + 4, bar_bot - 4),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 0, 0),
+            1,
+            cv2.LINE_AA,
+        )
+        center = _ann_get(track, "plate_center")
+        if center and len(center) >= 2:
+            cx, cy = int(center[0]), int(center[1])
+        else:
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        arm = 6
+        cv2.line(out, (cx - arm, cy), (cx + arm, cy), (0, 255, 255), 1)
+        cv2.line(out, (cx, cy - arm), (cx, cy + arm), (0, 255, 255), 1)
+    return out
+
+
+PREVIEW_MAX_SIDE = 960
+PREVIEW_JPEG_QUALITY = 75
+
+
+def encode_preview_jpeg(image: np.ndarray) -> tuple[bytes, float]:
+    """JPEG at quality 75, long side capped at 960px. Returns bytes and scale."""
+    height, width = image.shape[:2]
+    long_side = max(height, width)
+    scale = 1.0
+    preview = image
+    if long_side > PREVIEW_MAX_SIDE:
+        scale = PREVIEW_MAX_SIDE / float(long_side)
+        preview = cv2.resize(
+            image,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    ok, buf = cv2.imencode(
+        ".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), PREVIEW_JPEG_QUALITY]
+    )
+    if not ok:
+        raise RuntimeError("Failed to encode preview JPEG")
+    return buf.tobytes(), scale
+
+
 class MinioUploader:
     def __init__(self, settings: Settings) -> None:
         from minio import Minio
@@ -148,6 +236,18 @@ class MinioUploader:
             data,
             length=len(buf),
             content_type="image/jpeg",
+        )
+        return key
+
+    def upload_jpeg(self, key: str, data: bytes, cache_control: str | None = None) -> str:
+        meta = {"Cache-Control": cache_control} if cache_control else None
+        self.client.put_object(
+            self.settings.minio_bucket,
+            key,
+            io.BytesIO(data),
+            length=len(data),
+            content_type="image/jpeg",
+            metadata=meta,
         )
         return key
 
@@ -235,6 +335,8 @@ class OCRPipeline:
         self._next_track_id = 1
         self.byte_tracker = ByteTracker(track_thresh=0.35, match_thresh=0.3, track_buffer=45)
         self._annotate_writer: cv2.VideoWriter | None = None
+        self._last_frame_publish: dict[str, float] = {}
+        self._redis: Any = None
 
         if self.backend == "plateocr":
             from ocr_engine.plateocr_backend import PlateOCRReader, ensure_plateocr_available
@@ -319,6 +421,7 @@ class OCRPipeline:
                         self._process_frame_plateocr(frame)
                     else:
                         self._process_frame_legacy(frame)
+                    self._publish_live_frame(frame)
                     if self._annotate_writer is not None:
                         self._annotate_writer.write(self._draw_annotations(frame))
                     emitted += self._finalize_stale_tracks()
@@ -339,6 +442,72 @@ class OCRPipeline:
                 self._annotate_writer = None
                 logger.info("Wrote annotated video → %s", annotate_out)
         return emitted
+
+    def _live_tracks(self) -> list[dict[str, Any]]:
+        tracks: list[dict[str, Any]] = []
+        for tid in sorted(self._active_ids):
+            state = self.tracks.get(tid)
+            if state is None or state.last_bbox is None:
+                continue
+            direction = estimate_direction(state.centers, self.camera_heading_deg)
+            tracks.append(
+                {
+                    "track_id": state.track_id,
+                    "plate_norm": state.last_text,
+                    "vehicle_class": state.vehicle_class,
+                    "bbox": [int(v) for v in state.last_bbox],
+                    "confidence": float(state.last_ocr_conf),
+                    "lane": state.lane,
+                    "direction": direction.value if direction else None,
+                }
+            )
+        return tracks
+
+    def _publish_live_frame(self, frame: np.ndarray) -> None:
+        """Overwrite frames/latest/{camera}.jpg and notify Redis. Throttled to 2 Hz."""
+        if not getattr(self.settings, "publish_annotated_frames", True):
+            return
+        if self.uploader is None:
+            return
+        now = time.monotonic()
+        last = self._last_frame_publish.get(self.camera_id, 0.0)
+        if now - last < 0.5:
+            return
+        self._last_frame_publish[self.camera_id] = now
+        try:
+            tracks = self._live_tracks()
+            annotated = draw_annotations(frame, tracks)
+            jpeg, scale = encode_preview_jpeg(annotated)
+            key = f"frames/latest/{self.camera_id}.jpg"
+            self.uploader.upload_jpeg(key, jpeg, cache_control="no-store")
+            notice_tracks = []
+            for track in tracks:
+                bbox = track["bbox"]
+                notice_tracks.append(
+                    {
+                        **track,
+                        "bbox": [round(v * scale) for v in bbox],
+                    }
+                )
+            payload = {
+                "camera_id": self.camera_id,
+                "ts": datetime.now(UTC).isoformat(),
+                "key": key,
+                "tracks": notice_tracks,
+            }
+            self._redis_publish_frame(payload)
+        except Exception:
+            logger.warning("Annotated frame publish failed for %s", self.camera_id, exc_info=True)
+
+    def _redis_publish_frame(self, payload: dict[str, Any]) -> None:
+        try:
+            import redis
+
+            if self._redis is None:
+                self._redis = redis.Redis.from_url(self.settings.redis_url)
+            self._redis.publish("frames", json.dumps(payload))
+        except Exception:
+            logger.warning("Redis frames publish failed for %s", self.camera_id, exc_info=True)
 
     def _draw_annotations(self, frame: np.ndarray) -> np.ndarray:
         """Overlay ByteTrack IDs, boxes, and latest OCR text for active tracks."""
@@ -388,6 +557,7 @@ class OCRPipeline:
             raise RuntimeError(f"Cannot read image: {source}")
         hits = self.plateocr_reader.read(img)
         emitted = 0
+        current_ids: set[int] = set()
         try:
             for hit in hits:
                 x1, y1, x2, y2 = hit.bbox
@@ -407,10 +577,16 @@ class OCRPipeline:
                     best_quality=hit.det_confidence,
                     frames_seen=self.FUSION_MIN_FRAMES,
                     last_bbox=hit.bbox,
+                    last_text=hit.text,
+                    last_ocr_conf=float(hit.ocr_confidence),
                 )
+                self.tracks[state.track_id] = state
+                current_ids.add(state.track_id)
                 self._next_track_id += 1
                 if self._emit_track(state):
                     emitted += 1
+            self._active_ids = current_ids
+            self._publish_live_frame(img)
         finally:
             self.publisher.close()
         return emitted

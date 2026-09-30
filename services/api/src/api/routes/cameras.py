@@ -2,19 +2,36 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, HTTPException, status
 from geoalchemy2 import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
+from minio.error import S3Error
 from sqlalchemy import delete, select
 
 from api.db import Camera
-from api.deps import AdminUserDep, SessionDep, UserDep
+from api.deps import AdminUserDep, MinioDep, SessionDep, SettingsDep, UserDep
 from api.schemas import CameraCreate, CameraOut, CameraUpdate
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
 
 
-def _camera_out(row: Camera, lat: float, lng: float) -> CameraOut:
+def frame_object_key(camera_id: str) -> str:
+    return f"frames/latest/{camera_id}.jpg"
+
+
+def frame_exists(minio, settings, camera_id: str) -> bool:
+    try:
+        minio.stat_object(settings.minio_bucket, frame_object_key(camera_id))
+        return True
+    except (S3Error, OSError):
+        return False
+
+
+def _camera_out(
+    row: Camera, lat: float, lng: float, *, has_live_frame: bool = False
+) -> CameraOut:
     return CameraOut(
         id=row.id,
         name=row.name,
@@ -26,20 +43,59 @@ def _camera_out(row: Camera, lat: float, lng: float) -> CameraOut:
         osm_u=row.osm_u,
         osm_v=row.osm_v,
         status=row.status,
+        has_live_frame=has_live_frame,
     )
 
 
 @router.get("", response_model=list[CameraOut])
-async def list_cameras(session: SessionDep, _user: UserDep) -> list[CameraOut]:
+async def list_cameras(
+    session: SessionDep,
+    _user: UserDep,
+    minio: MinioDep,
+    settings: SettingsDep,
+) -> list[CameraOut]:
     result = await session.execute(
         select(Camera, ST_Y(Camera.geom).label("lat"), ST_X(Camera.geom).label("lng"))
     )
     rows = result.all()
-    return [_camera_out(cam, float(lat), float(lng)) for cam, lat, lng in rows]
+    return [
+        _camera_out(
+            cam,
+            float(lat),
+            float(lng),
+            has_live_frame=frame_exists(minio, settings, cam.id),
+        )
+        for cam, lat, lng in rows
+    ]
+
+
+@router.get("/{camera_id}/frame")
+async def camera_frame(
+    camera_id: str,
+    _user: UserDep,
+    minio: MinioDep,
+    settings: SettingsDep,
+) -> dict[str, str]:
+    """Short-TTL presigned URL for the latest annotated JPEG. Bytes stay in MinIO."""
+    key = frame_object_key(camera_id)
+    if not frame_exists(minio, settings, camera_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Live frame not found")
+    url = minio.presigned_get_object(
+        settings.minio_bucket,
+        key,
+        expires=timedelta(minutes=5),
+    )
+    return {"url": url, "key": key}
 
 
 @router.get("/{camera_id}", response_model=CameraOut)
-async def get_camera(camera_id: str, session: SessionDep, _user: UserDep) -> CameraOut:
+async def get_camera(
+    camera_id: str,
+    session: SessionDep,
+    _user: UserDep,
+    minio: MinioDep,
+    settings: SettingsDep,
+) -> CameraOut:
     result = await session.execute(
         select(Camera, ST_Y(Camera.geom).label("lat"), ST_X(Camera.geom).label("lng")).where(
             Camera.id == camera_id
@@ -49,7 +105,12 @@ async def get_camera(camera_id: str, session: SessionDep, _user: UserDep) -> Cam
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
     cam, lat, lng = row
-    return _camera_out(cam, float(lat), float(lng))
+    return _camera_out(
+        cam,
+        float(lat),
+        float(lng),
+        has_live_frame=frame_exists(minio, settings, cam.id),
+    )
 
 
 @router.post("", response_model=CameraOut, status_code=status.HTTP_201_CREATED)

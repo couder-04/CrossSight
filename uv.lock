@@ -364,6 +364,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "torch" },
     { name = "ultralytics" },
 ]
@@ -396,6 +397,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "torch", specifier = ">=2.3" },
     { name = "ultralytics", specifier = ">=8.2" },

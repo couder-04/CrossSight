@@ -11,11 +11,16 @@ export class LiveSocket {
   private subscribed = new Set<string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private url: string;
+
+  constructor(url?: string) {
+    this.url = url ?? WS_URL;
+  }
 
   connect() {
     if (typeof window === "undefined") return;
     this.closed = false;
-    this.ws = new WebSocket(WS_URL);
+    this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
       if (this.subscribed.size > 0) {
@@ -66,4 +71,17 @@ export class LiveSocket {
     this.ws?.close();
     this.ws = null;
   }
+}
+
+export async function openWallSocket(): Promise<LiveSocket> {
+  const tokenRes = await fetch("/api/auth/ws-token");
+  if (!tokenRes.ok) {
+    throw new Error("Not authenticated");
+  }
+  const body = (await tokenRes.json()) as { token: string };
+  const base = (process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws/live").replace(
+    /\/ws\/live\/?$/,
+    "",
+  );
+  return new LiveSocket(`${base}/ws/wall?token=${encodeURIComponent(body.token)}`);
 }
