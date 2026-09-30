@@ -82,11 +82,7 @@ async def list_alerts(
         stmt = stmt.where(AlertRow.severity == severity)
     result = await session.execute(stmt)
     mode = normalize_source(source)
-    rows = [
-        row
-        for row in result.scalars()
-        if _alert_in_source(list(row.camera_ids or []), mode)
-    ]
+    rows = [row for row in result.scalars() if _alert_in_source(list(row.camera_ids or []), mode)]
     return [_alert_out(r) for r in rows]
 
 
