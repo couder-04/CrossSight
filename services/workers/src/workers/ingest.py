@@ -205,7 +205,7 @@ class IngestWorker:
     async def _batch_loop(self) -> None:
         while not self._stop.is_set():
             await asyncio.sleep(BATCH_INTERVAL_SEC)
-            if len(self._buffer) >= BATCH_MAX_ROWS or self._buffer:
+            if self._buffer or self._heatmap_buffer:
                 await self._flush_buffer()
 
     async def _consume_loop(self) -> None:
