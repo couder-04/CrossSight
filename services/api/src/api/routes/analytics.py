@@ -76,19 +76,28 @@ async def heatmap(
     end = datetime.now(UTC).replace(second=0, microsecond=0)
     start = end - delta
     cells = _heatmap_cells(ch, start, end)
+    stale = False
+    latest_ts: str | None = None
     # If wall-clock window is empty (common under 60× sim), use latest data window.
     if not cells:
         latest = ch.query("SELECT max(ts) FROM anpr_reads")
         if latest.result_rows and latest.result_rows[0][0] is not None:
             end_raw = latest.result_rows[0][0]
             if hasattr(end_raw, "tzinfo") and end_raw.tzinfo is None:
-                end = end_raw.replace(tzinfo=UTC)
-            else:
-                end = end_raw if getattr(end_raw, "tzinfo", None) else datetime.now(UTC)
-            end = end.replace(second=0, microsecond=0)
+                end_raw = end_raw.replace(tzinfo=UTC)
+            latest_ts = end_raw.isoformat() if hasattr(end_raw, "isoformat") else str(end_raw)
+            end = end_raw.replace(second=0, microsecond=0) if hasattr(end_raw, "replace") else end_raw
             start = end - delta
             cells = _heatmap_cells(ch, start, end)
-    return {"window": window, "start": start.isoformat(), "end": end.isoformat(), "cells": cells}
+            stale = True
+    return {
+        "window": window,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "cells": cells,
+        "stale": stale,
+        "latest_ts": latest_ts,
+    }
 
 
 @router.get("/flow")

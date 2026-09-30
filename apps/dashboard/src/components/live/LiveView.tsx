@@ -27,6 +27,8 @@ export function LiveView() {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [segments, setSegments] = useState<SegmentCongestion[]>([]);
   const [heatmap, setHeatmap] = useState<Map<string, number>>(new Map());
+  const [heatmapStale, setHeatmapStale] = useState(false);
+  const [heatmapLatest, setHeatmapLatest] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [flowByCamera, setFlowByCamera] = useState<Map<string, FlowWindow>>(new Map());
   const [routeCorridors, setRouteCorridors] = useState<
@@ -53,6 +55,8 @@ export function LiveView() {
       const hmMap = new Map<string, number>();
       hm.cells.forEach((c) => hmMap.set(String(c.h3), c.count));
       setHeatmap(hmMap);
+      setHeatmapStale(Boolean(hm.stale));
+      setHeatmapLatest(hm.latest_ts ?? null);
       setAlerts(recentAlerts.slice(0, 20));
       setRouteCorridors(density.corridors ?? []);
     } catch (err) {
@@ -230,6 +234,14 @@ export function LiveView() {
     <div className="h-full flex">
       <div className="flex-1 relative">
         <DeckMap layers={layers} />
+        {heatmapStale && (
+          <div
+            className="absolute top-3 left-3 z-10"
+            title={heatmapLatest ? `Latest read ${heatmapLatest}` : "Heatmap window is older than wall clock"}
+          >
+            <Badge tone="warning">Stale heatmap</Badge>
+          </div>
+        )}
       </div>
 
       <aside className="w-80 border-l border-border bg-surface-raised flex flex-col overflow-hidden">

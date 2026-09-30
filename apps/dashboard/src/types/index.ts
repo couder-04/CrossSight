@@ -62,6 +62,8 @@ export interface HeatmapCell {
 export interface HeatmapResponse {
   cells: HeatmapCell[];
   window?: string;
+  stale?: boolean;
+  latest_ts?: string | null;
 }
 
 export interface HeatmapWsPayload {
