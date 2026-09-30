@@ -98,3 +98,66 @@ def test_weak_reads_get_enhanced_reread():
     reader = _StubReader(missed=set(), conf=0.4)
     _run(_pipeline(reader)[0], 5, datetime(2026, 6, 1, tzinfo=UTC))
     assert reader.crop_reads == 5
+
+
+# --- run() end to end on a real (tiny) video file ------------------------------------------------
+# Guards the call signatures used by the CLI (stride/source_start) and video_city
+# (ocr_every/release); a merge once left run() referencing parameters it no longer had.
+
+
+class _RunPublisher(_Publisher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    def connect(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def _tiny_video(path, frames: int = 12, fps: float = 10.0) -> str:
+    import cv2
+
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (320, 240))
+    for i in range(frames):
+        writer.write(np.full((240, 320, 3), 20 * (i % 10), np.uint8))
+    writer.release()
+    return str(path)
+
+
+def _run_pipeline(reader: _StubReader) -> tuple[OCRPipeline, _RunPublisher]:
+    from types import SimpleNamespace
+
+    p, _ = _pipeline(reader)
+    pub = _RunPublisher()
+    p.publisher = cast(Any, pub)
+    p.settings = cast(Any, SimpleNamespace(ocr_frame_stride=1, publish_annotated_frames=False))
+    p._annotate_writer = None
+    p._next_track_id = 1
+    p._last_frame_publish = {}
+    p._redis = None
+    return p, pub
+
+
+def test_run_cli_signature_stamps_capture_time(tmp_path):
+    video = _tiny_video(tmp_path / "clip.avi")
+    t0 = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    p, pub = _run_pipeline(_StubReader(missed=set()))
+    emitted = p.run(video, stride=1, source_start=t0)
+    assert emitted == 1
+    assert [e.plate_norm for e in pub.events] == [PLATE]
+    # Last sighting is the 12th frame at 10 fps -> ~1.1 s after the recording start.
+    assert t0 <= pub.events[0].ts <= t0 + timedelta(seconds=1.5)
+    assert pub.closed == 1
+
+
+def test_run_video_city_signature_keeps_publisher_open(tmp_path):
+    video = _tiny_video(tmp_path / "clip.avi")
+    reader = _StubReader(missed=set())
+    p, pub = _run_pipeline(reader)
+    emitted = p.run(video, reconnect=False, ocr_every=2, release=False)
+    assert emitted == 1
+    assert reader.frame == 6  # every 2nd of 12 frames processed
+    assert pub.closed == 0
