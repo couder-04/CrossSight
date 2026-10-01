@@ -1,6 +1,10 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE } from "@/lib/auth";
+import { upstreamFetch } from "@/lib/upstream";
+
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 function apiBase(): string {
   return process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -31,15 +35,13 @@ async function proxy(request: NextRequest, segments: string[]) {
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    const payload = await request.arrayBuffer();
-    init.body = payload;
-    headers.set("Content-Length", String(payload.byteLength));
+    init.body = await request.arrayBuffer();
   }
 
-  const timeoutMs = SLOW_PREFIXES.has(segments[0] ?? "") ? 120_000 : 12_000;
+  const timeoutMs = SLOW_PREFIXES.has(segments[0] ?? "") ? 45_000 : 12_000;
   let res: Response;
   try {
-    res = await fetch(target, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    res = await upstreamFetch(target, init, timeoutMs);
   } catch {
     return NextResponse.json({ error: "Control room API is unreachable" }, { status: 502 });
   }

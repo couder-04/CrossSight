@@ -1,4 +1,5 @@
 import { sourceMode } from "@/lib/source";
+import { publicApiError, upstreamFetch } from "@/lib/upstream";
 import type {
   Alert,
   AuditEntry,
@@ -33,7 +34,7 @@ function errorMessage(body: unknown, fallback: string): string {
   if (!body || typeof body !== "object") return fallback;
   const record = body as { detail?: unknown; error?: unknown };
   const value = record.detail ?? record.error;
-  if (typeof value === "string" && value) return value;
+  if (typeof value === "string" && value) return publicApiError(value);
   if (Array.isArray(value)) {
     const parts = value.map((item) => {
       if (item && typeof item === "object" && "msg" in item) return String(item.msg);
@@ -44,7 +45,13 @@ function errorMessage(body: unknown, fallback: string): string {
   if (value && typeof value === "object" && "message" in value) {
     return String((value as { message: unknown }).message);
   }
-  return fallback;
+  return publicApiError(fallback);
+}
+
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function apiBase(): string {
@@ -67,31 +74,52 @@ async function request<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
-  if (!res.ok) {
-    let detail = res.statusText;
+  const method = (init.method ?? "GET").toUpperCase();
+  const canRetry = method === "GET" || method === "HEAD";
+  const attempts = canRetry ? 2 : 1;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      detail = errorMessage(await res.json(), detail);
-    } catch {
-      // ignore
+      const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          detail = errorMessage(await res.json(), detail);
+        } catch {
+          // ignore
+        }
+        if (canRetry && attempt + 1 < attempts && RETRYABLE_STATUS.has(res.status)) {
+          await delay(400);
+          continue;
+        }
+        throw new ApiError(res.status, publicApiError(detail));
+      }
+      if (res.status === 204) return undefined as T;
+      return (await res.json()) as T;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (attempt + 1 < attempts) {
+        await delay(400);
+        continue;
+      }
+      throw new ApiError(502, "Control room API is unreachable");
     }
-    throw new ApiError(res.status, detail);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  throw new ApiError(502, "Control room API is unreachable");
 }
 
 export const api = {
   login(username: string, password: string): Promise<LoginResponse> {
     const base = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    return fetch(`${base}/auth/login`, {
+    return upstreamFetch(`${base}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     }).then(async (res) => {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new ApiError(res.status, body.detail ?? "Login failed");
+        const detail = typeof body.detail === "string" ? body.detail : "Login failed";
+        throw new ApiError(res.status, publicApiError(detail));
       }
       return res.json() as Promise<LoginResponse>;
     });

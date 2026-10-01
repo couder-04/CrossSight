@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { AUTH_COOKIE, USER_COOKIE, sessionCookieOptions } from "@/lib/auth";
+import { upstreamFetch } from "@/lib/upstream";
+
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 const API_BASE =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -20,15 +24,18 @@ export async function POST(request: Request) {
 
   try {
     const result = await api.login(username, password);
-    const modeRes = await fetch(`${API_BASE}/sources/mode`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${result.access_token}`,
-        "Content-Type": "application/json",
+    const modeRes = await upstreamFetch(
+      `${API_BASE}/sources/mode`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${result.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mode: source }),
       },
-      body: JSON.stringify({ mode: source }),
-      cache: "no-store",
-    });
+      20_000,
+    );
     if (!modeRes.ok) {
       const modeBody = (await modeRes.json().catch(() => ({}))) as { detail?: string; error?: string };
       const detail = modeBody.detail ?? modeBody.error ?? "Could not start that mode";
@@ -54,8 +61,9 @@ export async function POST(request: Request) {
 
     return response;
   } catch (err) {
-    const status = err && typeof err === "object" && "status" in err ? (err as { status: number }).status : 500;
-    const message = err instanceof Error ? err.message : "Login failed";
-    return NextResponse.json({ error: message }, { status });
+    if (err instanceof ApiError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    return NextResponse.json({ error: "Control room API is unreachable" }, { status: 502 });
   }
 }
